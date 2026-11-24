@@ -16,7 +16,6 @@ export const registerSchema = z.object({
     .max(128, 'At most 128 characters')
     .regex(/[A-Za-z]/, 'Include at least one letter')
     .regex(/\d/, 'Include at least one digit'),
-  role: z.enum(['BUYER', 'SUPPLIER']),
 });
 
 export type LoginForm = z.infer<typeof loginSchema>;

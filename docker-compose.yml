@@ -7,6 +7,11 @@ x-backend-env: &backend-env
   DATABASE_URL: postgresql+asyncpg://rfq:rfq@postgres:5432/rfq_auction
   REDIS_URL: redis://redis:6379/0
   CORS_ORIGINS: '["http://localhost:5173"]'
+  FRONTEND_BASE_URL: http://localhost:${FRONTEND_PORT:-5173}
+  # Dev: every email is caught by Mailpit (UI on :8025), nothing leaves the machine.
+  EMAIL_BACKEND: smtp
+  SMTP_HOST: mailpit
+  SMTP_PORT: "1025"
 
 services:
   postgres:
@@ -34,6 +39,15 @@ services:
       timeout: 3s
       retries: 20
 
+  mailpit:
+    image: axllent/mailpit:v1.21
+    ports: ["${MAILPIT_UI_PORT:-8025}:8025"]
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8025/livez"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
   api:
     build: ./backend
     command: ["./scripts/start-api.sh"]
@@ -43,6 +57,7 @@ services:
     depends_on:
       postgres: { condition: service_healthy }
       redis: { condition: service_healthy }
+      mailpit: { condition: service_started }
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/health/ready').status==200 else 1)"]
       interval: 5s

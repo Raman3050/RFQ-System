@@ -9,10 +9,10 @@ from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.api.deps import BuyerUser
-from app.cli.seed import SEED_USERS, seed_users
-from app.core.security import create_access_token
+from app.cli.seed import SEED_RFQS, SEED_USERS, seed_rfqs, seed_users
+from app.core.security import create_access_token, hash_password
 from app.models.refresh_token import RefreshToken
-from app.models.user import User
+from app.models.user import User, UserRole
 
 pytestmark = pytest.mark.integration
 
@@ -27,7 +27,6 @@ def register_payload(**overrides: Any) -> dict[str, Any]:
         "password": PASSWORD,
         "full_name": "Priya Sharma",
         "company_name": "Acme",
-        "role": "BUYER",
         **overrides,
     }
 
@@ -40,6 +39,22 @@ async def refresh_with(client: AsyncClient, token: str) -> Response:
     """Send a specific refresh token, bypassing the client's cookie jar."""
     client.cookies.clear()
     return await client.post(f"{AUTH}/refresh", headers={"Cookie": f"{COOKIE}={token}"})
+
+
+async def make_supplier(app: FastAPI, email: str) -> str:
+    """Suppliers can't self-register; create one directly and return an access token."""
+    async with app.state.sessionmaker() as s:
+        user = User(
+            email=email,
+            password_hash=hash_password(PASSWORD),
+            full_name="Sam Supplier",
+            company_name="Carrier Co",
+            role=UserRole.SUPPLIER,
+        )
+        s.add(user)
+        await s.commit()
+        token, _ = create_access_token(app.state.settings, user_id=user.id, role="SUPPLIER")
+        return token
 
 
 def bearer(token: str) -> dict[str, str]:
@@ -78,6 +93,8 @@ async def test_register_duplicate_email_is_case_insensitive(db_client: AsyncClie
 @pytest.mark.parametrize(
     ("override", "field"),
     [
+        # Public sign-up can't pick a role: suppliers are invite-only.
+        ({"role": "SUPPLIER"}, "role"),
         ({"role": "ADMIN"}, "role"),
         ({"password": "short1"}, "password"),
         ({"password": "lettersonly"}, "password"),
@@ -174,9 +191,7 @@ async def test_role_guard(db_app: FastAPI, db_client: AsyncClient) -> None:
         return {"ok": user.email}
 
     buyer = (await register(db_client)).json()["access_token"]
-    supplier = (await register(db_client, email="s@example.com", role="SUPPLIER")).json()[
-        "access_token"
-    ]
+    supplier = await make_supplier(db_app, "s@example.com")
 
     assert (await db_client.get("/_test/buyer-only", headers=bearer(buyer))).status_code == 200
     denied = await db_client.get("/_test/buyer-only", headers=bearer(supplier))
@@ -294,9 +309,19 @@ async def test_seed_is_idempotent_and_users_can_log_in(
     async with sessionmaker() as s:
         assert await seed_users(s, "Seed@12345") == (0, len(SEED_USERS))
 
+    async with sessionmaker() as s:
+        assert await seed_rfqs(s) == len(SEED_RFQS)
+    async with sessionmaker() as s:
+        assert await seed_rfqs(s) == 0
+
     for su in SEED_USERS:
         resp = await db_client.post(
             f"{AUTH}/login", json={"email": su.email, "password": "Seed@12345"}
         )
         assert resp.status_code == 200, su.email
         assert resp.json()["user"]["role"] == su.role.value
+        if su.email == "buyer@example.com":
+            token = resp.json()["access_token"]
+            listing = await db_client.get("/api/v1/rfqs", headers=bearer(token))
+            statuses = sorted(r["status"] for r in listing.json()["items"])
+            assert statuses == ["ACTIVE", "CLOSED", "SCHEDULED"]

@@ -12,7 +12,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import Settings
-from app.core.errors import AuthenticationError, ConflictError
+from app.core.errors import AuthenticationError, ConflictError, GoneError, NotFoundError
 from app.core.logging import get_logger
 from app.core.security import (
     create_access_token,
@@ -22,10 +22,14 @@ from app.core.security import (
     password_needs_rehash,
     verify_password,
 )
-from app.models.user import User
+from app.models.auction_event import EventType
+from app.models.invitation import SupplierInvite
+from app.models.user import User, UserRole
+from app.repositories.event_repo import EventRepository
+from app.repositories.invitation_repo import InvitationRepository
 from app.repositories.refresh_token_repo import RefreshTokenRepository
 from app.repositories.user_repo import UserRepository
-from app.schemas.auth import LoginRequest, RegisterRequest
+from app.schemas.auth import AcceptInviteRequest, InviteInfo, LoginRequest, RegisterRequest
 
 log = get_logger(__name__)
 
@@ -45,6 +49,8 @@ class AuthService:
         self.settings = settings
         self.users = UserRepository(session)
         self.tokens = RefreshTokenRepository(session)
+        self.invitations = InvitationRepository(session)
+        self.events = EventRepository(session)
 
     async def register(self, data: RegisterRequest, *, user_agent: str | None) -> IssuedTokens:
         if await self.users.get_by_email(data.email):
@@ -55,7 +61,7 @@ class AuthService:
             password_hash=hash_password(data.password),
             full_name=data.full_name,
             company_name=data.company_name,
-            role=data.role,
+            role=UserRole.BUYER,
             last_login_at=func.now(),
         )
         try:
@@ -70,6 +76,73 @@ class AuthService:
         await self.session.commit()
         log.info("user_registered", user_id=str(user.id), role=user.role.value)
         return issued
+
+    # ------------------------------------------------------------ supplier invites
+
+    async def inspect_invite(self, token: str) -> InviteInfo:
+        invite = await self._valid_invite(token, for_update=False)
+        inviter = await self.users.get(invite.invited_by)
+        return InviteInfo(
+            email=invite.email,
+            invited_by_company=inviter.company_name if inviter else "",
+            expires_at=invite.expires_at,
+        )
+
+    async def accept_invite(
+        self, data: AcceptInviteRequest, *, user_agent: str | None
+    ) -> IssuedTokens:
+        """Creates the SUPPLIER account for an invited email, attaches it to every RFQ
+        that email was invited to, and starts a session. Single use."""
+        invite = await self._valid_invite(data.token, for_update=True)
+        if await self.users.get_by_email(invite.email):
+            raise ConflictError(
+                "An account with this email already exists. Please sign in.",
+                code="EMAIL_TAKEN",
+            )
+        user = User(
+            email=invite.email,  # fixed by the invite: proves ownership of the inbox
+            password_hash=hash_password(data.password),
+            full_name=data.full_name,
+            company_name=data.company_name,
+            role=UserRole.SUPPLIER,
+            last_login_at=func.now(),
+        )
+        await self.users.add(user)
+        await self.invitations.mark_accepted(invite, user.id)
+        for rfq_id in await self.invitations.link_supplier(invite.email, user.id):
+            self.events.record(
+                rfq_id,
+                EventType.SUPPLIER_JOINED,
+                actor_id=user.id,
+                payload={"email": invite.email, "company": data.company_name},
+            )
+        issued = await self._issue(user, family_id=uuid.uuid4(), user_agent=user_agent)
+        await self.session.commit()
+        log.info("supplier_joined", user_id=str(user.id))
+        return issued
+
+    async def _valid_invite(self, token: str, *, for_update: bool) -> SupplierInvite:
+        invite = await self.invitations.invite_by_token_hash(
+            hash_refresh_token(token), for_update=for_update
+        )
+        if invite is None:
+            # Unknown, or superseded by a newer invite email.
+            raise NotFoundError(
+                "This invitation link is invalid. Ask the buyer to resend it.",
+                code="INVITE_INVALID",
+            )
+        if invite.accepted_at is not None:
+            raise GoneError(
+                "This invitation has already been used. Please sign in.", code="INVITE_USED"
+            )
+        if invite.expires_at <= datetime.now(UTC):
+            raise GoneError(
+                "This invitation has expired. Ask the buyer to resend it.",
+                code="INVITE_EXPIRED",
+            )
+        return invite
+
+    # ------------------------------------------------------------ sessions
 
     async def login(self, data: LoginRequest, *, user_agent: str | None) -> IssuedTokens:
         user = await self.users.get_by_email(data.email)

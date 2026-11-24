@@ -22,10 +22,17 @@ export interface LoginInput {
   password: string;
 }
 
+/** Public sign-up creates a BUYER. Suppliers join only through an emailed invite. */
 export interface RegisterInput extends LoginInput {
   full_name: string;
   company_name: string;
-  role: Extract<Role, 'BUYER' | 'SUPPLIER'>;
+}
+
+export interface AcceptInviteInput {
+  token: string;
+  password: string;
+  full_name: string;
+  company_name: string;
 }
 
 export const ROLE_LABEL: Record<Role, string> = {

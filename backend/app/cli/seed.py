@@ -1,4 +1,5 @@
-"""Seed demo users (idempotent): one buyer and four suppliers.
+"""Seed demo data (idempotent): one buyer, four suppliers and three demo RFQs
+(one live, one upcoming, one closed) with suppliers already invited.
 
 Run:  python -m app.cli.seed            (inside docker: make seed)
 
@@ -9,14 +10,19 @@ local/demo credentials only; the command refuses to run in staging/production.
 import asyncio
 import os
 from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
 from app.core.logging import configure_logging, get_logger
 from app.core.security import hash_password
 from app.db.session import create_engine, create_sessionmaker
+from app.models.invitation import RfqInvitation
+from app.models.rfq import AuctionConfig, Rfq, RfqStatus, TriggerType
 from app.models.user import User, UserRole
+from app.repositories.rfq_repo import RfqRepository
 from app.repositories.user_repo import UserRepository
 
 DEFAULT_SEED_PASSWORD = "Demo@12345"  # noqa: S105 - documented local demo credential
@@ -64,6 +70,91 @@ async def seed_users(session: AsyncSession, password: str) -> tuple[int, int]:
     return created, skipped
 
 
+@dataclass(frozen=True)
+class SeedRfq:
+    name: str
+    start: timedelta  # relative to now
+    close: timedelta
+    forced: timedelta
+    trigger: TriggerType | None  # None = plain RFQ (no British Auction)
+    invite: tuple[str, ...]
+
+
+# Times are relative to "now", so a fresh seed always shows one auction in each state.
+SEED_RFQS: tuple[SeedRfq, ...] = (
+    SeedRfq(
+        "Mumbai → Delhi FTL, 20T container",
+        -timedelta(minutes=10),
+        timedelta(minutes=50),
+        timedelta(minutes=90),
+        TriggerType.BID_RECEIVED,
+        ("supplier1@example.com", "supplier2@example.com", "supplier3@example.com"),
+    ),
+    SeedRfq(
+        "Chennai Port → Bengaluru reefer, 12T",
+        timedelta(days=1),
+        timedelta(days=1, hours=2),
+        timedelta(days=1, hours=3),
+        TriggerType.L1_RANK_CHANGE,
+        ("supplier1@example.com", "supplier4@example.com"),
+    ),
+    SeedRfq(
+        "Pune → Hyderabad LTL, 4 pallets",
+        -timedelta(days=2),
+        -timedelta(days=1, hours=22),
+        -timedelta(days=1, hours=21),
+        TriggerType.ANY_RANK_CHANGE,
+        ("supplier2@example.com", "supplier3@example.com"),
+    ),
+)
+
+
+async def seed_rfqs(session: AsyncSession) -> int:
+    """Creates demo RFQs for the demo buyer if they have none. Inserted directly (not
+    via the service) because some are deliberately in the past."""
+    users = UserRepository(session)
+    buyer = await users.get_by_email(SEED_USERS[0].email)
+    if buyer is None:
+        return 0
+    if (await session.execute(select(Rfq.id).where(Rfq.buyer_id == buyer.id).limit(1))).first():
+        return 0
+
+    rfqs = RfqRepository(session)
+    suppliers = await users.get_by_emails([u.email for u in SEED_USERS[1:]])
+    now = datetime.now(UTC).replace(second=0, microsecond=0)
+    for sr in SEED_RFQS:
+        start = now + sr.start
+        rfq = Rfq(
+            reference_id=f"RFQ-{start.year}-{await rfqs.next_reference_number():06d}",
+            name=sr.name,
+            buyer_id=buyer.id,
+            is_british_auction=sr.trigger is not None,
+            bid_start_at=start,
+            bid_close_at=now + sr.close,
+            current_close_at=now + sr.close,
+            forced_close_at=now + sr.forced,
+            pickup_date=(now + sr.forced + timedelta(days=2)).date(),
+            status=RfqStatus.SCHEDULED,
+            config=AuctionConfig(
+                trigger_window_minutes=10, extension_minutes=5, trigger_type=sr.trigger
+            )
+            if sr.trigger
+            else None,
+        )
+        await rfqs.add(rfq)
+        for email in sr.invite:
+            session.add(
+                RfqInvitation(
+                    rfq_id=rfq.id,
+                    invitee_email=email,
+                    supplier_id=suppliers[email].id,
+                    invited_by=buyer.id,
+                )
+            )
+    await session.commit()
+    return len(SEED_RFQS)
+
+
 async def main() -> None:
     settings = get_settings()
     configure_logging(settings.log_level, json=settings.log_json)
@@ -76,7 +167,8 @@ async def main() -> None:
             created, skipped = await seed_users(
                 session, os.environ.get("SEED_PASSWORD", DEFAULT_SEED_PASSWORD)
             )
-        log.info("seed_complete", created=created, skipped=skipped)
+            rfqs = await seed_rfqs(session)
+        log.info("seed_complete", users_created=created, users_skipped=skipped, rfqs_created=rfqs)
     finally:
         await engine.dispose()
 

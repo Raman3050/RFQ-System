@@ -32,13 +32,16 @@ export function authResponse(user: User, token = 'access-1'): AuthResponse {
 
 /**
  * Stubs global fetch with a route table keyed by "METHOD /path".
+ * A key ending in "*" matches by prefix (e.g. "GET /api/v1/rfqs?*").
  * Unmatched requests fail the test loudly. Returns the mock for call assertions.
  */
 export function mockApi(routes: Record<string, Handler>) {
   const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = typeof input === 'string' ? input : input.toString();
     const key = `${(init?.method ?? 'GET').toUpperCase()} ${url}`;
-    const handler = routes[key];
+    const handler =
+      routes[key] ??
+      Object.entries(routes).find(([k]) => k.endsWith('*') && key.startsWith(k.slice(0, -1)))?.[1];
     if (!handler) throw new Error(`Unmocked request: ${key}`);
     return handler(init);
   });

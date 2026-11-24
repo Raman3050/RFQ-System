@@ -9,7 +9,7 @@
  */
 import { API_V1, apiRequest } from '@/api/client';
 
-import type { AuthResponse, LoginInput, RegisterInput } from './types';
+import type { AcceptInviteInput, AuthResponse, LoginInput, RegisterInput } from './types';
 
 type Listener = (session: AuthResponse | null) => void;
 
@@ -43,6 +43,17 @@ export async function login(input: LoginInput): Promise<AuthResponse> {
 
 export async function register(input: RegisterInput): Promise<AuthResponse> {
   const session = await apiRequest<AuthResponse>(`${API_V1}/auth/register`, {
+    method: 'POST',
+    json: input,
+    auth: false,
+  });
+  publish(session);
+  return session;
+}
+
+/** Create a supplier account from an emailed invite link and start a session. */
+export async function acceptInvite(input: AcceptInviteInput): Promise<AuthResponse> {
+  const session = await apiRequest<AuthResponse>(`${API_V1}/auth/invitations/accept`, {
     method: 'POST',
     json: input,
     auth: false,

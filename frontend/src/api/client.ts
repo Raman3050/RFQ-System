@@ -138,8 +138,9 @@ export function fieldErrors(error: unknown): Record<string, string> {
   if (!(error instanceof ApiError) || !error.problem?.errors) return {};
   const out: Record<string, string> = {};
   for (const e of error.problem.errors) {
-    const field = e.loc[e.loc.length - 1];
-    if (typeof field === 'string' && !(field in out)) {
+    // ["body", "supplier_emails", 2] → the list field "supplier_emails".
+    const field = [...e.loc].reverse().find((p): p is string => typeof p === 'string');
+    if (field && field !== 'body' && !(field in out)) {
       out[field] = e.msg.replace(/^Value error, /, '');
     }
   }

@@ -3,7 +3,6 @@
 An RFQ (Request for Quotation) platform with British Auction–style bidding: automatic time
 extensions near close, a hard forced-close time, configurable triggers, and live auction progress.
 
-- **Design and roadmap:** [docs/HLD.md](docs/HLD.md)
 - **Stack:** React + Vite + TypeScript + MUI · FastAPI (Python 3.13) · PostgreSQL 16 · Redis 7
 
 ## Project status
@@ -12,8 +11,9 @@ extensions near close, a hard forced-close time, configurable triggers, and live
 |---|---|---|
 | 0 | Foundations: scaffolding, Docker, migrations, health checks, CI | ✅ Done |
 | 1 | Auth & users: JWT + rotating refresh cookie, roles, seed data, login/register UI | ✅ Done |
-| 2 | RFQ creation & listing | ⏳ Next |
-| 3–8 | Bidding engine, lifecycle worker, real-time, caching, hardening, analytics | Planned |
+| 2 | RFQ create/edit/cancel, invite-only suppliers via email, listing & details pages | ✅ Done |
+| 3 | Bidding engine: bids, ranking, auto-extensions, activity log | ⏳ Next |
+| 4–8 | Lifecycle worker, real-time, caching, hardening, analytics | Planned |
 
 ## Repository layout
 
@@ -29,9 +29,8 @@ backend/            FastAPI service + lifecycle worker
 frontend/           React SPA
   src/app/          router, providers, theme, React Query client
   src/api/          typed fetch client (problem+json → ApiError, server-time sync)
-  src/features/     feature folders (system status page for now)
-docs/HLD.md         high-level design and phased roadmap
-docker-compose.yml  postgres, redis, api, worker, frontend
+  src/features/     feature folders: auth, rfqs (list, create/edit, details), system
+docker-compose.yml  postgres, redis, mailpit, api, worker, frontend
 ```
 
 ## Running with Docker (recommended)
@@ -46,6 +45,7 @@ make up                 # or: docker compose up -d --build
 | Service | URL |
 |---|---|
 | Frontend | http://localhost:5173 (the **System** page shows live Postgres/Redis status) |
+| Mailpit (dev inbox) | http://localhost:8025 — every email the app sends lands here |
 | API docs (Swagger) | http://localhost:8080/api/v1/docs |
 | Liveness / readiness | http://localhost:8080/health/live · http://localhost:8080/health/ready |
 
@@ -62,7 +62,18 @@ make seed    # idempotent; refuses to run in staging/production
 | Buyer | buyer@example.com | Demo@12345 |
 | Supplier | supplier1@example.com … supplier4@example.com | Demo@12345 |
 
-In dev mode the login page has one-click buttons that fill these in.
+In dev mode the login page has one-click buttons that fill these in. The seed also creates
+three demo RFQs for the buyer (one live, one upcoming, one ended) with suppliers invited.
+
+### Supplier onboarding (invite-only)
+
+Public sign-up creates **buyer** accounts only. To bring in a supplier:
+
+1. As the buyer, create an RFQ (or open one) and invite the supplier's email.
+2. Open Mailpit (http://localhost:8025). An existing supplier gets a "New RFQ" notice; a new
+   email gets a single-use sign-up link (valid 7 days, rotated if you press **Resend**).
+3. Open the link and choose a name, company and password. The account is created as a
+   supplier and attached to every RFQ that email was invited to.
 
 ## Running locally without Docker
 

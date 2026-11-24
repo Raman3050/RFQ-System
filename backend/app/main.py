@@ -12,6 +12,7 @@ from app.core.errors import register_exception_handlers
 from app.core.logging import configure_logging, get_logger
 from app.core.middleware import RequestContextMiddleware
 from app.db.session import create_engine, create_sessionmaker
+from app.email.sender import create_email_sender
 
 log = get_logger(__name__)
 
@@ -43,6 +44,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         docs_url=f"{settings.api_v1_prefix}/docs",
     )
     app.state.settings = settings
+    app.state.email_sender = create_email_sender(settings)
 
     app.add_middleware(
         CORSMiddleware,

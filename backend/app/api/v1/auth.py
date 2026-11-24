@@ -4,7 +4,15 @@ from fastapi import APIRouter, Cookie, Request, Response, status
 
 from app.api.deps import CurrentUser, DbSession, SettingsDep
 from app.core.config import Settings
-from app.schemas.auth import AuthResponse, LoginRequest, RegisterRequest, UserRead
+from app.schemas.auth import (
+    AcceptInviteRequest,
+    AuthResponse,
+    InviteInfo,
+    InviteTokenRequest,
+    LoginRequest,
+    RegisterRequest,
+    UserRead,
+)
 from app.services.auth_service import AuthService, IssuedTokens
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -46,7 +54,7 @@ def _auth_response(response: Response, settings: Settings, issued: IssuedTokens)
     "/register",
     response_model=AuthResponse,
     status_code=status.HTTP_201_CREATED,
-    summary="Create a buyer or supplier account and start a session",
+    summary="Create a buyer account and start a session (suppliers are invite-only)",
 )
 async def register(
     body: RegisterRequest,
@@ -56,6 +64,36 @@ async def register(
     settings: SettingsDep,
 ) -> AuthResponse:
     issued = await AuthService(session, settings).register(
+        body, user_agent=request.headers.get("user-agent")
+    )
+    return _auth_response(response, settings, issued)
+
+
+@router.post(
+    "/invitations/inspect",
+    response_model=InviteInfo,
+    summary="Look up a supplier invite link (to pre-fill the sign-up form)",
+)
+async def inspect_invite(
+    body: InviteTokenRequest, session: DbSession, settings: SettingsDep
+) -> InviteInfo:
+    return await AuthService(session, settings).inspect_invite(body.token)
+
+
+@router.post(
+    "/invitations/accept",
+    response_model=AuthResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Create a supplier account from an invite link and start a session",
+)
+async def accept_invite(
+    body: AcceptInviteRequest,
+    request: Request,
+    response: Response,
+    session: DbSession,
+    settings: SettingsDep,
+) -> AuthResponse:
+    issued = await AuthService(session, settings).accept_invite(
         body, user_agent=request.headers.get("user-agent")
     )
     return _auth_response(response, settings, issued)

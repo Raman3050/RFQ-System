@@ -26,6 +26,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from app.cache.redis import create_redis
 from app.core.config import Settings, get_settings
 from app.db.session import create_engine, create_sessionmaker
+from app.email.sender import MemoryEmailSender, OutgoingEmail
 from app.main import create_app
 
 BACKEND_DIR = Path(__file__).resolve().parents[1]
@@ -100,6 +101,8 @@ def integration_settings(integration_db_url: str) -> Settings:
         log_json=False,
         log_level="WARNING",
         database_url=integration_db_url,  # type: ignore[arg-type]
+        email_backend="memory",
+        frontend_base_url="http://app.test",
     )
 
 
@@ -114,9 +117,17 @@ async def db_app(integration_settings: Settings) -> AsyncIterator[FastAPI]:
         yield app
     finally:
         async with engine.begin() as conn:
-            await conn.execute(text("TRUNCATE users, refresh_tokens RESTART IDENTITY CASCADE"))
+            # Every table references users, so this cascades through all of them.
+            await conn.execute(text("TRUNCATE users RESTART IDENTITY CASCADE"))
         await app.state.redis.aclose()
         await engine.dispose()
+
+
+@pytest.fixture
+def outbox(db_app: FastAPI) -> list[OutgoingEmail]:
+    """Emails "sent" during the test (in-memory email backend)."""
+    sender: MemoryEmailSender = db_app.state.email_sender
+    return sender.outbox
 
 
 @pytest.fixture

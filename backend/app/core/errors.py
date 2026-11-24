@@ -58,6 +58,28 @@ class ConflictError(AppError):
     code = "CONFLICT"
 
 
+class DomainValidationError(AppError):
+    """422 with field-level `errors` in the same shape as request validation errors."""
+
+    status_code = HTTPStatus.UNPROCESSABLE_ENTITY
+    code = "VALIDATION_ERROR"
+
+    def __init__(self, errors: list[dict[str, Any]], detail: str = "Validation failed") -> None:
+        super().__init__(detail, extra={"errors": errors})
+
+
+class GoneError(AppError):
+    status_code = HTTPStatus.GONE
+    code = "GONE"
+
+
+class PreconditionFailedError(AppError):
+    """Optimistic-concurrency conflict (stale If-Match version)."""
+
+    status_code = HTTPStatus.PRECONDITION_FAILED
+    code = "VERSION_CONFLICT"
+
+
 class PermissionDeniedError(AppError):
     status_code = HTTPStatus.FORBIDDEN
     code = "FORBIDDEN"

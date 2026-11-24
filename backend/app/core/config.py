@@ -40,6 +40,21 @@ class Settings(BaseSettings):
     # Must be True whenever the app is served over HTTPS (staging/production).
     refresh_cookie_secure: bool = False
 
+    # Supplier invitations
+    supplier_invite_ttl_days: int = Field(default=7, ge=1, le=30)
+    frontend_base_url: str = "http://localhost:5173"  # used to build links in emails
+
+    # Email. "smtp" in deployed envs (and Mailpit locally); "memory" keeps messages
+    # in-process for tests; "console" just logs them.
+    email_backend: Literal["smtp", "console", "memory"] = "console"
+    email_from: str = "RFQ Auctions <no-reply@rfq-auctions.local>"
+    smtp_host: str = "localhost"
+    smtp_port: int = 1025
+    smtp_username: str | None = None
+    smtp_password: SecretStr | None = None
+    smtp_use_tls: bool = False
+    smtp_timeout_seconds: float = 10.0
+
     # Lifecycle worker
     worker_tick_seconds: float = 1.0
 

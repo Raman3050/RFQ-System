@@ -1,26 +1,17 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { MemoryRouter } from 'react-router-dom';
 import { beforeEach, describe, expect, it } from 'vitest';
 
 import { resetSession } from '@/features/auth/session';
+import { page } from '@/test/fixtures';
 import { ANON_REFRESH, authResponse, json, makeUser, mockApi, problem } from '@/test/mockApi';
+import { renderApp as renderAt } from '@/test/render';
 
-import { App } from './App';
-import { AppProviders } from './providers';
-
-function renderAt(path: string) {
-  return render(
-    <AppProviders>
-      <MemoryRouter initialEntries={[path]}>
-        <App />
-      </MemoryRouter>
-    </AppProviders>,
-  );
-}
+const EMPTY_LIST = { 'GET /api/v1/rfqs?*': () => json(page([])) };
 
 const restoredAs = (role: 'BUYER' | 'SUPPLIER') => ({
   'POST /api/v1/auth/refresh': () => json(authResponse(makeUser(role))),
+  ...EMPTY_LIST,
 });
 
 describe('App auth flows', () => {
@@ -32,9 +23,10 @@ describe('App auth flows', () => {
     expect(await screen.findByRole('heading', { name: 'Sign in' })).toBeInTheDocument();
   });
 
-  it('logs a buyer in and shows the buyer home page', async () => {
+  it('logs a buyer in and shows their auctions', async () => {
     const fetchMock = mockApi({
       ...ANON_REFRESH,
+      ...EMPTY_LIST,
       'POST /api/v1/auth/login': () => json(authResponse(makeUser('BUYER'))),
     });
     const user = userEvent.setup();
@@ -44,9 +36,9 @@ describe('App auth flows', () => {
     await user.type(screen.getByLabelText('Password'), 'Demo@12345');
     await user.click(screen.getByRole('button', { name: 'Sign in' }));
 
-    expect(await screen.findByRole('heading', { name: /Welcome, Priya/ })).toBeInTheDocument();
-    expect(screen.getByText('Create an RFQ')).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: 'Create RFQ' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'British Auctions' })).toBeInTheDocument();
+    expect(screen.getByText('RFQs created by Acme Manufacturing')).toBeInTheDocument();
+    expect(screen.getAllByRole('link', { name: 'Create RFQ' }).length).toBeGreaterThan(0);
 
     const loginCall = fetchMock.mock.calls.find(([url]) => url === '/api/v1/auth/login');
     expect(JSON.parse(String(loginCall?.[1]?.body))).toEqual({
@@ -93,12 +85,14 @@ describe('App auth flows', () => {
     expect(fetchMock.mock.calls.some(([url]) => url === '/api/v1/auth/login')).toBe(false);
   });
 
-  it('restores the session from the refresh cookie and shows the supplier home', async () => {
+  it('restores the session from the refresh cookie and shows the supplier view', async () => {
     mockApi(restoredAs('SUPPLIER'));
     renderAt('/auctions');
 
-    expect(await screen.findByRole('heading', { name: /Welcome, Arjun/ })).toBeInTheDocument();
-    expect(screen.getByText('Submit and lower bids')).toBeInTheDocument();
+    expect(await screen.findByText('RFQs you have been invited to quote on')).toBeInTheDocument();
+    expect(
+      await screen.findByText('When a buyer invites you to an RFQ it will appear here.'),
+    ).toBeInTheDocument();
     expect(screen.queryByRole('link', { name: 'Create RFQ' })).not.toBeInTheDocument();
   });
 
@@ -113,27 +107,36 @@ describe('App auth flows', () => {
   it('redirects signed-in users away from /login', async () => {
     mockApi(restoredAs('BUYER'));
     renderAt('/login');
-    expect(await screen.findByRole('heading', { name: /Welcome, Priya/ })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'British Auctions' })).toBeInTheDocument();
   });
 
-  it('registers a supplier', async () => {
+  it('registers a buyer (public sign-up has no role choice)', async () => {
     const fetchMock = mockApi({
       ...ANON_REFRESH,
-      'POST /api/v1/auth/register': () => json(authResponse(makeUser('SUPPLIER')), 201),
+      ...EMPTY_LIST,
+      'POST /api/v1/auth/register': () => json(authResponse(makeUser('BUYER')), 201),
     });
     const user = userEvent.setup();
     renderAt('/register');
 
-    await user.click(await screen.findByRole('button', { name: 'Supplier' }));
-    await user.type(screen.getByLabelText('Full name'), 'Arjun Mehta');
-    await user.type(screen.getByLabelText('Company'), 'BlueDart Freight');
-    await user.type(screen.getByLabelText('Work email'), 'supplier@example.com');
+    expect(
+      await screen.findByRole('heading', { name: 'Create a buyer account' }),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Supplier' })).not.toBeInTheDocument();
+    await user.type(screen.getByLabelText('Full name'), 'Priya Sharma');
+    await user.type(screen.getByLabelText('Company'), 'Acme');
+    await user.type(screen.getByLabelText('Work email'), 'priya@example.com');
     await user.type(screen.getByLabelText('Password'), 'Secret123');
     await user.click(screen.getByRole('button', { name: 'Create account' }));
 
-    expect(await screen.findByRole('heading', { name: /Welcome, Arjun/ })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'British Auctions' })).toBeInTheDocument();
     const call = fetchMock.mock.calls.find(([url]) => url === '/api/v1/auth/register');
-    expect(JSON.parse(String(call?.[1]?.body))).toMatchObject({ role: 'SUPPLIER' });
+    expect(JSON.parse(String(call?.[1]?.body))).toEqual({
+      full_name: 'Priya Sharma',
+      company_name: 'Acme',
+      email: 'priya@example.com',
+      password: 'Secret123',
+    });
   });
 
   it('shows EMAIL_TAKEN on the email field', async () => {

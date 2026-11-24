@@ -41,8 +41,26 @@ class RegisterRequest(BaseModel):
     password: Password
     full_name: Name
     company_name: CompanyName
-    # Self-service sign-up never grants ADMIN.
-    role: Literal[UserRole.BUYER, UserRole.SUPPLIER]
+    # Public sign-up always creates a BUYER. Suppliers join only via an email invite.
+
+
+class InviteTokenRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    # Sent in the body (not the URL) so tokens don't end up in access logs.
+    token: str = Field(min_length=20, max_length=200)
+
+
+class InviteInfo(BaseModel):
+    email: str
+    invited_by_company: str
+    expires_at: datetime
+
+
+class AcceptInviteRequest(InviteTokenRequest):
+    password: Password
+    full_name: Name
+    company_name: CompanyName
 
 
 class LoginRequest(BaseModel):

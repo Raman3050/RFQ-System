@@ -18,6 +18,12 @@ class UserRepository:
         result = await self.session.execute(select(User).where(User.email == email))
         return result.scalar_one_or_none()
 
+    async def get_by_emails(self, emails: list[str]) -> dict[str, User]:
+        if not emails:
+            return {}
+        result = await self.session.execute(select(User).where(User.email.in_(emails)))
+        return {u.email.lower(): u for u in result.scalars()}
+
     async def add(self, user: User) -> User:
         self.session.add(user)
         await self.session.flush()
