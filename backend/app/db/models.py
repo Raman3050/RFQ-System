@@ -1,8 +1,6 @@
-"""Import every ORM model here so Alembic autogenerate can see the full metadata.
-
-Models are added from Phase 1 onwards.
-"""
+"""Import every ORM model here so Alembic autogenerate can see the full metadata."""
 
 from app.db.base import Base
+from app.models import RefreshToken, User
 
-__all__ = ["Base"]
+__all__ = ["Base", "RefreshToken", "User"]

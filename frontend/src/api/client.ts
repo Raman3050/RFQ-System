@@ -35,19 +35,68 @@ export class ApiError extends Error {
 
 export const API_V1 = '/api/v1';
 
-type RequestOptions = Omit<RequestInit, 'body'> & { json?: unknown };
+// ------------------------------------------------------------------ auth integration
 
 /**
- * Thin fetch wrapper: JSON in/out, problem+json → ApiError, server-time sync.
- * Auth headers are added in Phase 1.
+ * The auth layer registers these so the client can attach the access token and
+ * transparently recover from an expired one, without importing React state.
  */
+export interface AuthHandlers {
+  getAccessToken: () => string | null;
+  /** Obtain a fresh access token (refresh-cookie rotation). Null = session is gone. */
+  refreshAccessToken: () => Promise<string | null>;
+}
+
+let authHandlers: AuthHandlers | null = null;
+
+export function setAuthHandlers(handlers: AuthHandlers | null): void {
+  authHandlers = handlers;
+}
+
+/** 401 codes meaning "your access token is stale, a refresh may fix it". */
+const REFRESHABLE_CODES = new Set(['TOKEN_EXPIRED', 'TOKEN_INVALID', 'NOT_AUTHENTICATED']);
+
+// ------------------------------------------------------------------ request
+
+export type RequestOptions = Omit<RequestInit, 'body'> & {
+  json?: unknown;
+  /** Attach the bearer token and retry once after a refresh. Default true. */
+  auth?: boolean;
+};
+
+/** JSON in/out, problem+json → ApiError, bearer auth with one refresh-and-retry. */
 export async function apiRequest<T>(path: string, options: RequestOptions = {}): Promise<T> {
+  const { auth = true, ...rest } = options;
+  try {
+    return await send<T>(path, rest, auth ? authHandlers?.getAccessToken() : null);
+  } catch (err) {
+    if (
+      auth &&
+      authHandlers &&
+      err instanceof ApiError &&
+      err.status === 401 &&
+      REFRESHABLE_CODES.has(err.code)
+    ) {
+      const fresh = await authHandlers.refreshAccessToken();
+      if (fresh) return send<T>(path, rest, fresh);
+    }
+    throw err;
+  }
+}
+
+async function send<T>(
+  path: string,
+  options: Omit<RequestOptions, 'auth'>,
+  accessToken: string | null | undefined,
+): Promise<T> {
   const { json, headers, ...rest } = options;
   const init: RequestInit = {
+    credentials: 'same-origin',
     ...rest,
     headers: {
       Accept: 'application/json',
       ...(json !== undefined ? { 'Content-Type': 'application/json' } : {}),
+      ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
       ...headers,
     },
     body: json !== undefined ? JSON.stringify(json) : undefined,
@@ -82,4 +131,17 @@ export async function apiRequest<T>(path: string, options: RequestOptions = {}):
 
 function isProblem(body: unknown): body is ProblemDetails {
   return typeof body === 'object' && body !== null && 'code' in body && 'status' in body;
+}
+
+/** First field-level message for a form field from a 422 problem, if any. */
+export function fieldErrors(error: unknown): Record<string, string> {
+  if (!(error instanceof ApiError) || !error.problem?.errors) return {};
+  const out: Record<string, string> = {};
+  for (const e of error.problem.errors) {
+    const field = e.loc[e.loc.length - 1];
+    if (typeof field === 'string' && !(field in out)) {
+      out[field] = e.msg.replace(/^Value error, /, '');
+    }
+  }
+  return out;
 }

@@ -1,5 +1,6 @@
 """Domain errors and RFC 7807 (problem+json) exception handlers."""
 
+from collections.abc import Mapping
 from http import HTTPStatus
 from typing import Any, cast
 
@@ -23,11 +24,28 @@ class AppError(Exception):
 
     status_code: int = HTTPStatus.BAD_REQUEST
     code: str = "BAD_REQUEST"
+    headers: Mapping[str, str] | None = None
 
-    def __init__(self, detail: str, *, extra: dict[str, Any] | None = None) -> None:
+    def __init__(
+        self,
+        detail: str,
+        *,
+        code: str | None = None,
+        extra: dict[str, Any] | None = None,
+    ) -> None:
         super().__init__(detail)
         self.detail = detail
+        if code is not None:
+            self.code = code
         self.extra = extra or {}
+
+
+class AuthenticationError(AppError):
+    """401 — missing, invalid or expired credentials. `code` says which."""
+
+    status_code = HTTPStatus.UNAUTHORIZED
+    code = "NOT_AUTHENTICATED"
+    headers = {"WWW-Authenticate": "Bearer"}  # noqa: RUF012 - read-only class constant
 
 
 class NotFoundError(AppError):
@@ -51,6 +69,7 @@ def _problem(
     code: str,
     detail: str,
     extra: dict[str, Any] | None = None,
+    headers: Mapping[str, str] | None = None,
 ) -> JSONResponse:
     body: dict[str, Any] = {
         "type": "about:blank",
@@ -63,18 +82,18 @@ def _problem(
     }
     if extra:
         body.update(extra)
-    return JSONResponse(body, status_code=status, media_type=PROBLEM_JSON)
+    return JSONResponse(body, status_code=status, media_type=PROBLEM_JSON, headers=headers)
 
 
 async def _app_error_handler(request: Request, exc: Exception) -> JSONResponse:
     err = cast(AppError, exc)
-    return _problem(request, err.status_code, err.code, err.detail, err.extra)
+    return _problem(request, err.status_code, err.code, err.detail, err.extra, err.headers)
 
 
 async def _http_error_handler(request: Request, exc: Exception) -> JSONResponse:
     err = cast(StarletteHTTPException, exc)
     code = HTTPStatus(err.status_code).name
-    return _problem(request, err.status_code, code, str(err.detail))
+    return _problem(request, err.status_code, code, str(err.detail), headers=err.headers)
 
 
 async def _validation_error_handler(request: Request, exc: Exception) -> JSONResponse:
