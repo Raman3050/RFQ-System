@@ -25,6 +25,3 @@ coverage/
 
 # Local test suites and load test (kept out of the repository)
 /testing/
-
-# Personal deep-dive guide (documents local-only testing/)
-PROJECT_GUIDE.md
