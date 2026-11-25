@@ -52,6 +52,9 @@ class Bid(Base):
     # Set explicitly to the DB clock read under the auction lock (design decision D9).
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
+    # Fetch total_amount via INSERT … RETURNING instead of a follow-up SELECT.
+    __mapper_args__ = {"eager_defaults": True}  # noqa: RUF012
+
     __table_args__ = (
         CheckConstraint(
             "freight_charges >= 0 AND origin_charges >= 0 AND destination_charges >= 0",

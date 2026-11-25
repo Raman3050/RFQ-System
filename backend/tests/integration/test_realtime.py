@@ -24,6 +24,7 @@ from app.main import create_app
 from app.models.user import UserRole
 from app.realtime.publisher import MemoryPublisher
 from app.services.lifecycle_service import LifecycleService
+from tests.conftest import redis_url_for_tests
 from tests.integration.helpers import RFQS, bid_payload, create_rfq, make_user, set_schedule
 
 pytestmark = pytest.mark.integration
@@ -166,15 +167,9 @@ async def test_winner_is_emailed_once_even_with_parallel_workers(
 # ---------------------------------------------------------------- end-to-end WebSocket
 
 
-def _redis_url() -> str:
-    # A dedicated logical DB so tests never touch app data.
-    base = os.environ.get("REDIS_URL", "redis://localhost:6379/0")
-    return base.rsplit("/", 1)[0] + "/15"
-
-
 @pytest.fixture
 def ws_app(integration_settings: Settings) -> Iterator[TestClient]:
-    url = _redis_url()
+    url = redis_url_for_tests()
     try:
         sync_redis.Redis.from_url(url, socket_connect_timeout=1).ping()
     except Exception as exc:

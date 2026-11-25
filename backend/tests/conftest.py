@@ -56,6 +56,12 @@ async def client(app: FastAPI) -> AsyncIterator[AsyncClient]:
 # ---------------------------------------------------------------- integration fixtures
 
 
+def redis_url_for_tests() -> str:
+    """Logical DB 15 of the configured Redis, so tests never touch app data."""
+    base = os.environ.get("REDIS_URL", "redis://localhost:6379/0")
+    return base.rsplit("/", 1)[0] + "/15"
+
+
 def _test_database_url() -> str:
     explicit = os.environ.get("TEST_DATABASE_URL")
     if explicit:
@@ -103,6 +109,8 @@ def integration_settings(integration_db_url: str) -> Settings:
         database_url=integration_db_url,  # type: ignore[arg-type]
         email_backend="memory",
         frontend_base_url="http://app.test",
+        redis_url=redis_url_for_tests(),  # type: ignore[arg-type]
+        rate_limit_enabled=False,  # enabled explicitly in test_rate_limit.py
     )
 
 

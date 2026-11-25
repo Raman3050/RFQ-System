@@ -13,7 +13,9 @@ Everything happens in ONE transaction that holds the RFQ row lock:
 - Bid insert, extension and log entries commit together or not at all.
 """
 
+import asyncio
 import uuid
+import weakref
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
@@ -24,7 +26,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import Settings
 from app.core.errors import ConflictError, DomainValidationError, NotFoundError
 from app.core.logging import get_logger
-from app.domain.bidding import AuctionRules, ExtensionDecision, decide_extension, rank
+from app.domain.bidding import AuctionRules, ExtensionDecision, Quote, decide_extension, rank
 from app.domain.rfq_status import effective_status
 from app.models.auction_event import EventType
 from app.models.bid import Bid
@@ -39,6 +41,17 @@ from app.repositories.rfq_repo import RfqRepository
 from app.schemas.bid import BidCreate, BidOut, BidResult, ExtensionOut
 
 log = get_logger(__name__)
+
+# Per-auction asyncio locks for this process; entries vanish once no request holds them.
+_queues: weakref.WeakValueDictionary[uuid.UUID, asyncio.Lock] = weakref.WeakValueDictionary()
+
+
+def _auction_queue(rfq_id: uuid.UUID) -> asyncio.Lock:
+    lock = _queues.get(rfq_id)
+    if lock is None:
+        lock = asyncio.Lock()
+        _queues[rfq_id] = lock
+    return lock
 
 
 @dataclass(frozen=True, slots=True)
@@ -69,6 +82,21 @@ class BiddingService:
         *,
         idempotency_key: str | None,
     ) -> BidResult:
+        # Queue same-auction bids inside this process *before* touching the database, so
+        # waiting requests don't each park a pooled DB connection on the row lock (which
+        # would starve bids on other auctions). The row lock below remains the guarantee
+        # across processes; this only bounds contention to one waiter per process.
+        async with _auction_queue(rfq_id):
+            return await self._submit(supplier, rfq_id, data, idempotency_key=idempotency_key)
+
+    async def _submit(
+        self,
+        supplier: User,
+        rfq_id: uuid.UUID,
+        data: BidCreate,
+        *,
+        idempotency_key: str | None,
+    ) -> BidResult:
         rfq = await self.rfqs.get_for_update(rfq_id)  # serialises all bids on this RFQ
         if rfq is None or not await self._is_invited(rfq.id, supplier.id):
             raise NotFoundError("RFQ not found", code="RFQ_NOT_FOUND")
@@ -84,16 +112,19 @@ class BiddingService:
         self._ensure_open(rfq, now)
         self._validate_quote(data, rfq, now)
 
-        previous = await self.bids.latest_for_supplier(rfq.id, supplier.id)
+        # One query gives every supplier's current quote: the ranking before this bid,
+        # this supplier's previous price, and (with the new bid swapped in) the ranking after.
+        quotes = {q.supplier_id: q for q in await self.bids.latest_quotes(rfq.id)}
+        previous = quotes.get(supplier.id)
         new_total = data.freight_charges + data.origin_charges + data.destination_charges
-        if previous is not None and new_total >= previous.total_amount:
+        if previous is not None and new_total >= previous.total:
             raise ConflictError(
                 "Your new bid must be lower than your current bid",
                 code="BID_NOT_LOWER",
-                extra={"your_current_total": str(previous.total_amount)},
+                extra={"your_current_total": str(previous.total)},
             )
 
-        before = [q.supplier_id for q in rank(await self.bids.latest_quotes(rfq.id))]
+        before = [q.supplier_id for q in rank(list(quotes.values()))]
 
         bid = Bid(
             rfq_id=rfq.id,
@@ -113,9 +144,10 @@ class BiddingService:
         except IntegrityError as exc:  # same idempotency key raced in; the lock makes
             await self.session.rollback()  # this near-impossible, but never 500 on it
             raise ConflictError("Duplicate bid submission", code="DUPLICATE_BID") from exc
-        await self.session.refresh(bid)  # load the DB-computed total_amount
+        # total_amount (DB-computed) came back via INSERT … RETURNING (eager_defaults).
 
-        ranked = rank(await self.bids.latest_quotes(rfq.id))
+        quotes[supplier.id] = Quote(supplier.id, bid.id, bid.total_amount, bid.created_at)
+        ranked = rank(list(quotes.values()))
         after = [q.supplier_id for q in ranked]
         my_rank = after.index(supplier.id) + 1
 
@@ -180,7 +212,7 @@ class BiddingService:
             rank=my_rank,
             extended=applied is not None,
         )
-        return await self._result(rfq, bid, supplier.id, applied, now, replayed=False)
+        return self._build_result(rfq, bid, my_rank, len(after), applied, now, replayed=False)
 
     # ---------------------------------------------------------------- helpers
 
@@ -270,10 +302,25 @@ class BiddingService:
         replayed: bool,
     ) -> BidResult:
         ranked = [q.supplier_id for q in rank(await self.bids.latest_quotes(rfq.id))]
+        return self._build_result(
+            rfq, bid, ranked.index(supplier_id) + 1, len(ranked), applied, now, replayed=replayed
+        )
+
+    @staticmethod
+    def _build_result(
+        rfq: Rfq,
+        bid: Bid,
+        my_rank: int,
+        bidders: int,
+        applied: _Applied | None,
+        now: datetime,
+        *,
+        replayed: bool,
+    ) -> BidResult:
         return BidResult(
             bid=BidOut.model_validate(bid),
-            rank=ranked.index(supplier_id) + 1,
-            total_bidders=len(ranked),
+            rank=my_rank,
+            total_bidders=bidders,
             current_close_at=rfq.current_close_at,
             extension=ExtensionOut(
                 previous_close_at=applied.previous_close,

@@ -35,7 +35,7 @@ jobs:
     env:
       DATABASE_URL: postgresql+asyncpg://rfq:rfq@localhost:5432/rfq_auction
       REDIS_URL: redis://localhost:6379/0
-      ENVIRONMENT: test
+      ENVIRONMENT: test  # integration tests use Redis DB 15
       REQUIRE_INTEGRATION: "1"  # fail, don't skip, if Postgres is missing
     steps:
       - uses: actions/checkout@v4
@@ -78,5 +78,7 @@ jobs:
     needs: [backend, frontend]
     steps:
       - uses: actions/checkout@v4
-      - name: Build images
+      - name: Build dev images
         run: docker compose build
+      - name: Build production images
+        run: docker compose -f docker-compose.prod.yml --env-file .env.prod.example build

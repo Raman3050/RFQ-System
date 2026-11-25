@@ -6,6 +6,7 @@ from typing import Annotated
 from fastapi import APIRouter, Header, Query, Request, status
 
 from app.api.deps import CurrentUser, DbSession, SettingsDep, SupplierUser
+from app.core import rate_limit as rl
 from app.schemas.bid import BidCreate, BidHistoryItem, BidResult, EventPage, Leaderboard
 from app.services.auction_view_service import AuctionViewService
 from app.services.bidding_service import BiddingService
@@ -33,6 +34,7 @@ async def submit_bid(
     settings: SettingsDep,
     idempotency_key: Annotated[str | None, Header(max_length=100)] = None,
 ) -> BidResult:
+    await rl.enforce(request, rl.BIDS_PER_SUPPLIER_RFQ, f"{supplier.id}:{rfq_id}")
     return await BiddingService(session, settings, request.app.state.publisher).submit(
         supplier, rfq_id, body, idempotency_key=idempotency_key
     )

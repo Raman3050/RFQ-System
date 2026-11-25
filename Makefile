@@ -11,7 +11,8 @@ export DATABASE_URL ?= postgresql+asyncpg://rfq:rfq@localhost:$(POSTGRES_PORT)/r
 export REDIS_URL ?= redis://localhost:$(REDIS_PORT)/0
 
 .PHONY: help setup up down logs ps migrate revision seed \
-        be-test be-lint be-fmt fe-lock fe-test fe-lint fe-build check
+        be-test be-lint be-fmt fe-lock fe-test fe-lint fe-build check \
+        prod-up prod-down prod-logs loadtest
 
 help: ## Show available targets
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  %-12s %s\n", $$1, $$2}'
@@ -65,3 +66,19 @@ fe-build: ## Frontend production build
 	cd $(FRONTEND) && npm run build
 
 check: be-lint be-test fe-lint fe-test fe-build ## Everything CI runs
+
+# ---------------------------------------------------------------- production-style stack
+PROD := docker compose -f docker-compose.prod.yml --env-file .env.prod
+
+prod-up: ## Build + start the production stack (Nginx on :8088). Needs .env.prod
+	@test -f .env.prod || (echo "Create .env.prod from .env.prod.example first" && exit 1)
+	$(PROD) up -d --build --wait
+
+prod-down: ## Stop the production stack
+	$(PROD) down
+
+prod-logs: ## Tail production logs
+	$(PROD) logs -f --tail=100
+
+loadtest: ## Concurrent-bidding load test against the production stack (through Nginx)
+	$(PROD) --profile tools run --rm loadtest $(ARGS)

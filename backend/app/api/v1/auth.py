@@ -3,6 +3,7 @@ from typing import Annotated
 from fastapi import APIRouter, Cookie, Request, Response, status
 
 from app.api.deps import CurrentUser, DbSession, SettingsDep
+from app.core import rate_limit as rl
 from app.core.config import Settings
 from app.schemas.auth import (
     AcceptInviteRequest,
@@ -63,6 +64,7 @@ async def register(
     session: DbSession,
     settings: SettingsDep,
 ) -> AuthResponse:
+    await rl.enforce(request, rl.REGISTER_PER_IP, rl.client_ip(request))
     issued = await AuthService(session, settings).register(
         body, user_agent=request.headers.get("user-agent")
     )
@@ -75,8 +77,9 @@ async def register(
     summary="Look up a supplier invite link (to pre-fill the sign-up form)",
 )
 async def inspect_invite(
-    body: InviteTokenRequest, session: DbSession, settings: SettingsDep
+    body: InviteTokenRequest, request: Request, session: DbSession, settings: SettingsDep
 ) -> InviteInfo:
+    await rl.enforce(request, rl.INVITE_TOKEN_PER_IP, rl.client_ip(request))
     return await AuthService(session, settings).inspect_invite(body.token)
 
 
@@ -93,6 +96,7 @@ async def accept_invite(
     session: DbSession,
     settings: SettingsDep,
 ) -> AuthResponse:
+    await rl.enforce(request, rl.INVITE_TOKEN_PER_IP, rl.client_ip(request))
     issued = await AuthService(session, settings).accept_invite(
         body, user_agent=request.headers.get("user-agent")
     )
@@ -107,6 +111,8 @@ async def login(
     session: DbSession,
     settings: SettingsDep,
 ) -> AuthResponse:
+    await rl.enforce(request, rl.LOGIN_PER_IP, rl.client_ip(request))
+    await rl.enforce(request, rl.LOGIN_PER_ACCOUNT, body.email)
     issued = await AuthService(session, settings).login(
         body, user_agent=request.headers.get("user-agent")
     )
@@ -125,6 +131,7 @@ async def refresh(
     settings: SettingsDep,
     rfq_refresh: Annotated[str | None, Cookie(include_in_schema=False)] = None,
 ) -> AuthResponse:
+    await rl.enforce(request, rl.REFRESH_PER_IP, rl.client_ip(request))
     # Read by configured name; the parameter above only documents the default.
     raw = request.cookies.get(settings.refresh_cookie_name, rfq_refresh)
     issued = await AuthService(session, settings).refresh(

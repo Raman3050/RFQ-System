@@ -4,6 +4,7 @@ from typing import Annotated
 from fastapi import APIRouter, BackgroundTasks, Header, Query, Request, status
 
 from app.api.deps import BuyerUser, CurrentUser, DbSession, SettingsDep
+from app.core import rate_limit as rl
 from app.core.errors import AppError
 from app.email.sender import EmailSender, OutgoingEmail, send_safely
 from app.models.rfq import RfqStatus
@@ -51,6 +52,7 @@ async def create_rfq(
     session: DbSession,
     settings: SettingsDep,
 ) -> RfqDetail:
+    await rl.enforce(request, rl.INVITES_PER_BUYER, str(buyer.id))
     result = await RfqService(session, settings).create(buyer, body)
     _queue(background, request, result.emails)
     return result.value
@@ -132,6 +134,7 @@ async def invite_suppliers(
     session: DbSession,
     settings: SettingsDep,
 ) -> RfqDetail:
+    await rl.enforce(request, rl.INVITES_PER_BUYER, str(buyer.id))
     result = await RfqService(session, settings).invite(buyer, rfq_id, body.emails)
     _queue(background, request, result.emails)
     return result.value
@@ -151,6 +154,7 @@ async def resend_invitation(
     session: DbSession,
     settings: SettingsDep,
 ) -> dict[str, str]:
+    await rl.enforce(request, rl.INVITES_PER_BUYER, str(buyer.id))
     result = await RfqService(session, settings).resend_invitation(buyer, rfq_id, email)
     _queue(background, request, result.emails)
     return {"status": "queued"}

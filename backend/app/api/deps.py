@@ -28,8 +28,8 @@ DbSession = Annotated[AsyncSession, Depends(get_db)]
 
 
 async def get_current_user(
+    request: Request,
     settings: SettingsDep,
-    session: DbSession,
     credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(_bearer)],
 ) -> User:
     if credentials is None or credentials.scheme.lower() != "bearer":
@@ -41,7 +41,10 @@ async def get_current_user(
         raise AuthenticationError("Access token is invalid or expired", code=code) from exc
 
     # Load the user every request so deactivation and role changes apply immediately.
-    user = await UserRepository(session).get(claims.user_id)
+    # Own short session: the pooled connection is released at once instead of being held
+    # for the whole request (which matters while bids queue for an auction).
+    async with request.app.state.sessionmaker() as session:
+        user = await UserRepository(session).get(claims.user_id)
     if user is None or not user.is_active:
         raise AuthenticationError("Account not found or disabled", code="TOKEN_INVALID")
     return user

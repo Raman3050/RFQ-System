@@ -15,8 +15,8 @@ extensions near close, a hard forced-close time, configurable triggers, and live
 | 3 | Bidding engine: bids, L1/L2 ranking, all 3 extension triggers, forced-close cap, activity log | ✅ Done |
 | 4 | Lifecycle worker: opens/closes/force-closes auctions on time, records the winner | ✅ Done |
 | 5 | Real-time updates (WebSockets + Redis pub/sub), winner email on close | ✅ Done |
-| 6 | Essential hardening: rate limiting, production images, load test, security pass | ⏳ Next |
-| 7 | Success metrics dashboard + submission polish | Planned |
+| 6 | Hardening: rate limiting, security headers, production images behind Nginx, load test | ✅ Done |
+| 7 | Success metrics dashboard + submission polish | ⏳ Next |
 
 ## Repository layout
 
@@ -77,6 +77,24 @@ Public sign-up creates **buyer** accounts only. To bring in a supplier:
    email gets a single-use sign-up link (valid 7 days, rotated if you press **Resend**).
 3. Open the link and choose a name, company and password. The account is created as a
    supplier and attached to every RFQ that email was invited to.
+
+## Production-style stack
+
+```bash
+cp .env.prod.example .env.prod      # set JWT_SECRET_KEY and POSTGRES_PASSWORD
+make prod-up                        # → http://localhost:8088 (Mailpit: :8026)
+make prod-down
+```
+
+- One origin: **Nginx** serves the built SPA and proxies `/api`, `/health` and the `/ws`
+  WebSocket to the API. Postgres and Redis publish no ports.
+- Runtime-only, non-root images (API image 345 MB vs 509 MB dev); migrations run as a one-shot
+  `migrate` job before the API starts; 2 uvicorn workers (safe: WebSocket fan-out is via Redis).
+- `ENVIRONMENT=production` enforces a strong `JWT_SECRET_KEY`, `Secure` cookies, hides the API
+  docs, enables HSTS. Nginx adds a strict Content-Security-Policy, long-lived caching for
+  fingerprinted assets, gzip, and a 1 MB body limit.
+- Demo seed data is refused in production: register a buyer in the UI and invite suppliers
+  (emails land in Mailpit).
 
 ## Running locally without Docker
 
@@ -167,6 +185,47 @@ bid / worker ──commit──▶ Redis PUBLISH auction:{id} ──▶ every AP
 commit, best-effort. If the process dies in that instant, the auction data is still correct but
 that one notification is lost (clients recover on their next refresh). A transactional outbox
 would make delivery guaranteed.
+
+## Abuse protection
+
+Redis fixed-window rate limits (atomic Lua script). They **fail open**: if Redis is down,
+requests are allowed and a warning is logged.
+
+| Endpoint | Limit | Key |
+|---|---|---|
+| `POST /auth/login` | 30/min · 10 per 5 min | client IP · account email |
+| `POST /auth/register` | 10/hour | client IP |
+| `POST /auth/invitations/inspect`, `/accept` | 20/min | client IP |
+| `POST /auth/refresh` | 60/min | client IP |
+| `POST /rfqs/{id}/bids` | 30/min | supplier + RFQ |
+| Creating/sending invitations | 200/hour | buyer |
+
+Over the limit → `429 RATE_LIMITED` with `Retry-After`.
+
+## Load test
+
+`make loadtest` (production stack, through Nginx): 60 suppliers × 3 live auctions × 6 bids, all
+inside the trigger window (every bid takes the extension path), plus 20 WebSocket viewers. After
+the run it re-checks the invariants in the database.
+
+| Metric | Result |
+|---|---|
+| Bids accepted | 1,080 / 1,080 (0 errors) |
+| Bid latency p50 / p95 / max | 32 ms / 1.07 s / 1.6 s |
+| WebSocket push lag p50 / p95 | 9 ms / 68 ms |
+| Invariants (close ≤ forced, 1 log entry per extension, stored L1 = true L1, every bid logged) | OK |
+
+The p95 tail is the opening burst: all 60 suppliers bid on one auction within ~1 s, and bids on
+a single auction are deliberately serialised (row lock) so extensions stay correct. Bids on
+different auctions run in parallel.
+
+What the first run found (p50 1.1 s, p95 8.1 s, two 502s), and the fixes:
+- Requests waiting for an auction's row lock each held a pooled DB connection, starving bids
+  on other auctions → same-auction bids now queue **in-process before** taking a connection, and
+  the auth lookup uses its own short session.
+- Fewer queries under the lock (one ranking query; `total_amount` returned by the INSERT).
+- 502s were a keep-alive race (uvicorn closed idle connections after 5 s, Nginx reused them) →
+  uvicorn keep-alive 75 s > Nginx 60 s.
 
 ## Authentication
 

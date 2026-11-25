@@ -1,0 +1,101 @@
+# Production-style stack: everything behind one Nginx origin, no database/Redis ports
+# published, runtime-only images, migrations as a one-shot job.
+#
+#   cp .env.prod.example .env.prod   # then set real secrets (also feeds ${...} below)
+#   make prod-up                     # → http://localhost:8088
+#
+# Mailpit is included so invite / winner emails can be seen in a demo; point SMTP_* at a
+# real mail service for an actual deployment.
+name: rfq-auction-prod
+
+x-backend: &backend
+  image: rfq-auction-backend:prod
+  env_file: .env.prod
+  environment:
+    ENVIRONMENT: production
+    LOG_JSON: "true"
+    EXPOSE_API_DOCS: "false"
+    REFRESH_COOKIE_SECURE: "true"
+    CORS_ORIGINS: "[]"  # same origin via Nginx: no cross-origin access needed
+    DATABASE_URL: postgresql+asyncpg://rfq:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env.prod}@postgres:5432/rfq_auction
+    REDIS_URL: redis://redis:6379/0
+    EMAIL_BACKEND: smtp
+  restart: unless-stopped
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: rfq
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env.prod}
+      POSTGRES_DB: rfq_auction
+    volumes: [pgdata:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U rfq -d rfq_auction"]
+      interval: 3s
+      timeout: 3s
+      retries: 30
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--save", "", "--appendonly", "no"]  # cache/pub-sub only
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 3s
+      timeout: 3s
+      retries: 30
+    restart: unless-stopped
+
+  mailpit:
+    image: axllent/mailpit:v1.21
+    ports: ["${MAILPIT_UI_PORT:-8026}:8025"]
+    restart: unless-stopped
+
+  migrate:
+    <<: *backend
+    build: { context: ./backend, target: prod }
+    command: ["alembic", "upgrade", "head"]
+    restart: "no"
+    depends_on:
+      postgres: { condition: service_healthy }
+
+  api:
+    <<: *backend
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+      redis: { condition: service_healthy }
+
+  worker:
+    <<: *backend
+    command: ["python", "-m", "app.workers.lifecycle"]
+    healthcheck: { disable: true }
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+      redis: { condition: service_healthy }
+
+  web:
+    build: { context: ./frontend, target: prod }
+    image: rfq-auction-web:prod
+    ports: ["${WEB_PORT:-8088}:8080"]
+    depends_on:
+      api: { condition: service_healthy }
+    restart: unless-stopped
+
+  # Load test (on demand):  make loadtest
+  loadtest:
+    build: { context: ./backend, target: dev }
+    image: rfq-auction-backend:dev-tools
+    profiles: ["tools"]
+    env_file: .env.prod
+    environment:
+      ENVIRONMENT: production
+      REFRESH_COOKIE_SECURE: "true"
+      DATABASE_URL: postgresql+asyncpg://rfq:${POSTGRES_PASSWORD}@postgres:5432/rfq_auction
+      REDIS_URL: redis://redis:6379/0
+    command: ["python", "-m", "scripts.loadtest", "--base-url", "http://web:8080"]
+    depends_on:
+      web: { condition: service_started }
+
+volumes:
+  pgdata:

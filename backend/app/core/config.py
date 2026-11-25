@@ -19,6 +19,7 @@ class Settings(BaseSettings):
     log_json: bool = True
 
     api_v1_prefix: str = "/api/v1"
+    expose_api_docs: bool = True  # Swagger UI + OpenAPI JSON; disable in production
     cors_origins: list[str] = Field(default_factory=lambda: ["http://localhost:5173"])
 
     database_url: PostgresDsn = PostgresDsn(
@@ -54,6 +55,9 @@ class Settings(BaseSettings):
     smtp_password: SecretStr | None = None
     smtp_use_tls: bool = False
     smtp_timeout_seconds: float = 10.0
+
+    # Abuse protection
+    rate_limit_enabled: bool = True
 
     # Real-time (WebSocket)
     ws_auth_timeout_seconds: float = 5.0

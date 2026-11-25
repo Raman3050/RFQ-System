@@ -65,3 +65,24 @@ async def test_worker_status_unknown_when_redis_unavailable(
     resp = await client.get("/health/ready")
     assert resp.status_code == 200
     assert resp.json()["workers"]["lifecycle"]["status"] == "unknown"
+
+
+async def test_security_headers(client: AsyncClient) -> None:
+    resp = await client.get("/api/v1/nope")
+    assert resp.headers["x-content-type-options"] == "nosniff"
+    assert resp.headers["x-frame-options"] == "DENY"
+    assert resp.headers["referrer-policy"] == "no-referrer"
+    assert resp.headers["cache-control"] == "no-store"
+    assert "strict-transport-security" not in resp.headers  # only when deployed (HTTPS)
+
+
+async def test_docs_can_be_disabled() -> None:
+    from httpx import ASGITransport
+
+    from app.core.config import Settings
+    from app.main import create_app
+
+    app = create_app(Settings(environment="test", expose_api_docs=False, log_json=False))
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+        assert (await c.get("/api/v1/docs")).status_code == 404
+        assert (await c.get("/api/v1/openapi.json")).status_code == 404
