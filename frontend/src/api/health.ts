@@ -7,10 +7,17 @@ export interface DependencyStatus {
   error: string | null;
 }
 
+export interface WorkerStatus {
+  status: 'ok' | 'stale' | 'missing' | 'unknown';
+  last_seen_at: string | null;
+  seconds_ago: number | null;
+}
+
 export interface HealthResponse {
   status: 'ok' | 'degraded';
   server_time: string;
   checks: Record<string, DependencyStatus>;
+  workers?: Record<string, WorkerStatus>;
 }
 
 export const healthKeys = { ready: ['health', 'ready'] as const };

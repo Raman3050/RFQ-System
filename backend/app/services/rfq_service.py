@@ -376,6 +376,7 @@ class RfqService:
             auction_config=AuctionConfigOut.model_validate(rfq.config) if rfq.config else None,
             buyer=BuyerOut(full_name=row.buyer_full_name, company_name=row.buyer_company),
             version=rfq.version,
+            closed_at=rfq.closed_at,
             created_at=rfq.created_at,
             updated_at=rfq.updated_at,
             invitations=invitations,

@@ -13,8 +13,9 @@ extensions near close, a hard forced-close time, configurable triggers, and live
 | 1 | Auth & users: JWT + rotating refresh cookie, roles, seed data, login/register UI | ✅ Done |
 | 2 | RFQ create/edit/cancel, invite-only suppliers via email, listing & details pages | ✅ Done |
 | 3 | Bidding engine: bids, L1/L2 ranking, all 3 extension triggers, forced-close cap, activity log | ✅ Done |
-| 4 | Lifecycle worker: persist open/close/force-close on time | ⏳ Next |
-| 5–8 | Real-time (WebSockets), caching, hardening, analytics | Planned |
+| 4 | Lifecycle worker: opens/closes/force-closes auctions on time, records the winner | ✅ Done |
+| 5 | Real-time updates over WebSockets | ⏳ Next |
+| 6–8 | Caching, hardening, analytics | Planned |
 
 ## Repository layout
 
@@ -116,12 +117,29 @@ The assignment leaves some behaviour open; these are the rules the engine implem
 | D11 | Schedule and auction rules can be edited only before bidding starts. |
 | D12 | Suppliers are **invite-only**; public sign-up creates buyers. |
 | D13 | An invite can be removed until the auction ends, **unless that supplier has bid** — then they stay. |
+| D14 | A quote must stay valid **at least until the pickup date**, so the winning price can't lapse before the goods move. |
 
 **Concurrency:** each bid runs in one transaction holding the RFQ's row lock (`SELECT … FOR
 UPDATE`), so bids on one auction are serialised (others run in parallel); ranking before/after,
 the extension and the activity-log entries commit atomically. A test fires 30 simultaneous bids
 and checks the invariants (close ≤ forced close, one log entry per extension, correct L1,
 strictly decreasing bids per supplier).
+
+## Lifecycle worker
+
+`python -m app.workers.lifecycle` (the `worker` service in Docker Compose) runs a 1-second tick:
+
+- **SCHEDULED → ACTIVE** at bid start (log: *Bidding opened*).
+- **ACTIVE → CLOSED** at the (possibly extended) close, or **FORCE_CLOSED** if extensions
+  reached the forced close; records `closed_at`, the winning bid, bid/bidder/extension counts.
+- Uses `SELECT … FOR UPDATE SKIP LOCKED`, so several replicas can run safely (tested with 4
+  workers racing over 12 auctions: each closed exactly once). A row locked by an in-flight
+  bid is skipped and re-checked on the next tick.
+- Catches up after downtime (logs both the start and the close).
+- Publishes a heartbeat to Redis; `/health/ready` and the **System** page show whether it's alive.
+
+Readers never depend on the worker being on time: status is always derived from the clock,
+and bids re-check the time under the row lock.
 
 ## Authentication
 

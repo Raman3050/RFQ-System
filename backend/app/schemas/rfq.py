@@ -135,6 +135,7 @@ class RfqDetail(RfqSummary):
     auction_config: AuctionConfigOut | None
     buyer: BuyerOut
     version: int
+    closed_at: UtcOut | None = Field(description="When the lifecycle worker closed it")
     created_at: UtcOut
     updated_at: UtcOut
     invitations: list[InvitationOut] | None = Field(description="Buyer only")

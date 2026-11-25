@@ -148,6 +148,19 @@ class AuctionViewService:
                     payload["supplier_company"] = alias
                     payload["is_you"] = is_you
                     payload.pop("supplier_id", None)
+            if not full and event.event_type in (
+                EventType.AUCTION_CLOSED,
+                EventType.AUCTION_FORCE_CLOSED,
+            ):
+                winner = payload.pop("winning_supplier_id", None)
+                if winner is not None:
+                    winner_id = uuid.UUID(winner)
+                    is_you = winner_id == user.id
+                    payload["winner_is_you"] = is_you
+                    payload["winning_supplier_company"] = (
+                        "You" if is_you else aliases.get(winner_id, "A bidder")
+                    )
+                payload.pop("winning_bid_id", None)
             items.append(
                 EventOut(
                     id=event.id,

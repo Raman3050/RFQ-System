@@ -42,6 +42,27 @@ export function SystemStatusPage() {
                 />
               </Stack>
             ))}
+            {Object.entries(data.workers ?? {}).map(([name, w]) => (
+              <Stack key={name} direction="row" spacing={1} sx={{ alignItems: 'center' }}>
+                <Typography sx={{ minWidth: 100, textTransform: 'capitalize' }}>
+                  {name} worker
+                </Typography>
+                <Chip
+                  label={
+                    w.status === 'ok'
+                      ? `ok · ${w.seconds_ago ?? 0}s ago`
+                      : w.status === 'stale'
+                        ? `stale · ${w.seconds_ago}s ago`
+                        : w.status
+                  }
+                  color={
+                    w.status === 'ok' ? 'success' : w.status === 'unknown' ? 'default' : 'warning'
+                  }
+                  size="small"
+                  variant="outlined"
+                />
+              </Stack>
+            ))}
             <Typography variant="body2" color="text.secondary">
               Server time: {new Date(data.server_time).toLocaleString()}
             </Typography>

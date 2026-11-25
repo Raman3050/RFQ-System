@@ -43,6 +43,7 @@ export interface RfqDetail extends RfqSummary {
   auction_config: AuctionConfig | null;
   buyer: { full_name: string; company_name: string };
   version: number;
+  closed_at: string | null;
   created_at: string;
   updated_at: string;
   invitations: Invitation[] | null;

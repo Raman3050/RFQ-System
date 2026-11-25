@@ -16,6 +16,7 @@ export const DOT: Record<Tone, string> = {
 };
 
 const str = (v: unknown) => (typeof v === 'string' ? v : '');
+const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
 
 /** Turn an event into a sentence (and a tone for its marker). */
 export function describeEvent(
@@ -77,10 +78,39 @@ export function describeEvent(
       return { tone: 'info', text: <>{str(p.company)} joined as a supplier</> };
     case 'SUPPLIER_REMOVED':
       return { tone: 'warning', text: <>Removed invitation for {str(p.email)}</> };
+    case 'AUCTION_STARTED':
+      return { tone: 'info', text: <>Bidding opened</> };
     case 'AUCTION_CLOSED':
-      return { tone: 'info', text: <>Auction closed</> };
-    case 'AUCTION_FORCE_CLOSED':
-      return { tone: 'warning', text: <>Auction force-closed</> };
+    case 'AUCTION_FORCE_CLOSED': {
+      const forced = e.type === 'AUCTION_FORCE_CLOSED';
+      const winner = str(p.winning_supplier_company);
+      return {
+        tone: forced ? 'warning' : 'extension',
+        text: (
+          <>
+            <b>{forced ? 'Auction force-closed' : 'Auction closed'}</b>
+            {winner ? (
+              <>
+                {' '}
+                — winner <b>{winner}</b> at <b>{formatMoney(str(p.winning_total), currency)}</b>
+              </>
+            ) : (
+              ' — no bids received'
+            )}
+            <Typography
+              variant="body2"
+              color="text.secondary"
+              component="span"
+              sx={{ display: 'block' }}
+            >
+              {str(p.reason)} · {plural(Number(p.total_bids ?? 0), 'bid')} from{' '}
+              {plural(Number(p.bidders ?? 0), 'supplier')} ·{' '}
+              {plural(Number(p.extension_count ?? 0), 'extension')}
+            </Typography>
+          </>
+        ),
+      };
+    }
     default:
       return { tone: 'info', text: e.type };
   }

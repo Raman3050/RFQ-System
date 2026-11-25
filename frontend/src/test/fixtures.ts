@@ -34,6 +34,7 @@ export function makeRfqDetail(overrides: Partial<RfqDetail> = {}): RfqDetail {
     },
     buyer: { full_name: 'Priya Sharma', company_name: 'Acme Manufacturing' },
     version: 1,
+    closed_at: null,
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
     invitations: [

@@ -43,3 +43,25 @@ async def test_ready_503_when_a_dependency_is_down(app: FastAPI, client: AsyncCl
 async def test_request_id_is_propagated(client: AsyncClient) -> None:
     resp = await client.get("/health/live", headers={"X-Request-ID": "abc123"})
     assert resp.headers["X-Request-ID"] == "abc123"
+
+
+async def test_ready_reports_worker_heartbeat(app: FastAPI, client: AsyncClient) -> None:
+    from app.api.health import WorkerStatus, worker_probes
+
+    async def fresh() -> WorkerStatus:
+        return WorkerStatus(status="ok", seconds_ago=0.4)
+
+    app.dependency_overrides[readiness_checks] = lambda: {"postgres": _ok}
+    app.dependency_overrides[worker_probes] = lambda: {"lifecycle": fresh}
+    body = (await client.get("/health/ready")).json()
+    assert body["workers"]["lifecycle"]["status"] == "ok"
+
+
+async def test_worker_status_unknown_when_redis_unavailable(
+    app: FastAPI, client: AsyncClient
+) -> None:
+    # No Redis on app.state in unit tests: the probe must degrade, not fail the request.
+    app.dependency_overrides[readiness_checks] = lambda: {"postgres": _ok}
+    resp = await client.get("/health/ready")
+    assert resp.status_code == 200
+    assert resp.json()["workers"]["lifecycle"]["status"] == "unknown"

@@ -16,7 +16,7 @@ import { ApiError, fieldErrors } from '@/api/client';
 import { FormTextField } from '@/components/FormTextField';
 import { useAuth } from '@/features/auth/AuthContext';
 import { formatMoney } from '@/lib/money';
-import { formatDateTime, toLocalDate } from '@/lib/datetime';
+import { formatDate, formatDateTime, toLocalDate } from '@/lib/datetime';
 
 import { useSubmitBid } from '../api';
 import type { BidResult, Leaderboard, RfqDetail } from '../types';
@@ -28,7 +28,7 @@ const MONEY = z
 
 const cents = (v: string) => Math.round(Number(v || 0) * 100);
 
-function bidSchema(currentTotal: string | null) {
+function bidSchema(currentTotal: string | null, pickupDate: string) {
   return z
     .object({
       carrier_name: z.string().trim().min(1, 'Required').max(120),
@@ -42,7 +42,12 @@ function bidSchema(currentTotal: string | null) {
       quote_validity_until: z
         .string()
         .min(1, 'Required')
-        .refine((v) => v >= toLocalDate(new Date()), 'Cannot be in the past'),
+        .refine((v) => v >= toLocalDate(new Date()), 'Cannot be in the past')
+        // A quote that lapses before pickup could be repriced after winning.
+        .refine(
+          (v) => v >= pickupDate,
+          `Must be valid at least until the pickup date (${formatDate(pickupDate)})`,
+        ),
     })
     .superRefine((v, ctx) => {
       const total =
@@ -87,10 +92,16 @@ export function BidForm({ rfq, board }: { rfq: RfqDetail; board: Leaderboard }) 
   const [formError, setFormError] = useState<string | null>(null);
   const mine = board.entries.find((e) => e.is_you);
   const l1 = board.entries[0];
-  const schema = useMemo(() => bidSchema(board.my_current_total), [board.my_current_total]);
+  const schema = useMemo(
+    () => bidSchema(board.my_current_total, rfq.pickup_date),
+    [board.my_current_total, rfq.pickup_date],
+  );
 
-  // Computed once (not on every render): a fresh quote defaults to 14 days validity.
-  const [defaultValidity] = useState(() => toLocalDate(new Date(Date.now() + 14 * 86_400_000)));
+  // Computed once (not on every render): 14 days from today, but never before pickup.
+  const [defaultValidity] = useState(() => {
+    const inTwoWeeks = toLocalDate(new Date(Date.now() + 14 * 86_400_000));
+    return inTwoWeeks > rfq.pickup_date ? inTwoWeeks : rfq.pickup_date;
+  });
   const defaults: BidForm = {
     carrier_name: mine?.carrier_name ?? user?.company_name ?? '',
     freight_charges: '',
@@ -205,6 +216,7 @@ export function BidForm({ rfq, board }: { rfq: RfqDetail; board: Leaderboard }) 
               control={control}
               label="Quote valid until"
               type="date"
+              helperText={`Must cover pickup (${formatDate(rfq.pickup_date)})`}
               slotProps={{ inputLabel: { shrink: true } }}
             />
           </Grid>

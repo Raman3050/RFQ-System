@@ -64,8 +64,14 @@ class DomainValidationError(AppError):
     status_code = HTTPStatus.UNPROCESSABLE_ENTITY
     code = "VALIDATION_ERROR"
 
-    def __init__(self, errors: list[dict[str, Any]], detail: str = "Validation failed") -> None:
-        super().__init__(detail, extra={"errors": errors})
+    def __init__(
+        self,
+        errors: list[dict[str, Any]],
+        detail: str = "Validation failed",
+        *,
+        extra: dict[str, Any] | None = None,
+    ) -> None:
+        super().__init__(detail, extra={"errors": errors, **(extra or {})})
 
 
 class GoneError(AppError):

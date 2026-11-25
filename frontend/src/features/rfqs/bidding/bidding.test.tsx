@@ -189,6 +189,29 @@ describe('bid form', () => {
     expect(callTo(fetchMock, 'POST', '/api/v1/rfqs/rfq-1/bids')).toBeUndefined();
   });
 
+  it('requires the quote to stay valid until the pickup date', async () => {
+    const fetchMock = mockApi({
+      ...asSupplier,
+      'GET /api/v1/rfqs/rfq-1': () => json({ ...supplierDetail, pickup_date: '2099-06-15' }),
+      'GET /api/v1/rfqs/rfq-1/leaderboard': () => json(board([])),
+      'GET /api/v1/rfqs/rfq-1/events?*': () => json(noEvents),
+    });
+    const user = userEvent.setup();
+    renderApp('/auctions/rfq-1');
+
+    const validity = await screen.findByLabelText('Quote valid until');
+    expect(validity).toHaveValue('2099-06-15'); // default never lapses before pickup
+    await user.clear(validity);
+    await user.type(validity, '2099-06-14');
+    await user.type(screen.getByLabelText('Freight charges'), '500');
+    await user.click(screen.getByRole('button', { name: 'Submit bid' }));
+
+    expect(
+      await screen.findByText(/Must be valid at least until the pickup date/),
+    ).toBeInTheDocument();
+    expect(callTo(fetchMock, 'POST', '/api/v1/rfqs/rfq-1/bids')).toBeUndefined();
+  });
+
   it('shows the server message when the auction has just closed', async () => {
     mockApi({
       ...asSupplier,

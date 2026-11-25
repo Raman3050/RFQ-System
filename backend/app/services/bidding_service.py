@@ -74,7 +74,7 @@ class BiddingService:
                 return await self._result(rfq, existing, supplier.id, None, now, replayed=True)
 
         self._ensure_open(rfq, now)
-        self._validate_quote(data, now)
+        self._validate_quote(data, rfq, now)
 
         previous = await self.bids.latest_for_supplier(rfq.id, supplier.id)
         new_total = data.freight_charges + data.origin_charges + data.destination_charges
@@ -116,8 +116,6 @@ class BiddingService:
         l1 = ranked[0]
         rfq.current_l1_amount = l1.total
         rfq.current_l1_bid_id = l1.bid_id
-        if rfq.status == RfqStatus.SCHEDULED:
-            rfq.status = RfqStatus.ACTIVE  # persist what the clock already says
 
         self.events.record(
             rfq.id,
@@ -193,17 +191,23 @@ class BiddingService:
         )
 
     @staticmethod
-    def _validate_quote(data: BidCreate, now: datetime) -> None:
+    def _validate_quote(data: BidCreate, rfq: Rfq, now: datetime) -> None:
+        """A quote must still be valid on the pickup/service date, otherwise the winning
+        price could legally lapse before the goods move."""
         if data.quote_validity_until < now.astimezone(UTC).date():
-            raise DomainValidationError(
-                [
-                    {
-                        "loc": ["body", "quote_validity_until"],
-                        "msg": "Quote validity cannot be in the past",
-                        "type": "validity_in_past",
-                    }
-                ]
+            msg, kind = "Quote validity cannot be in the past", "validity_in_past"
+        elif data.quote_validity_until < rfq.pickup_date:
+            msg = (
+                "Quote must be valid at least until the pickup date "
+                f"({rfq.pickup_date.strftime('%d %b %Y')})"
             )
+            kind = "validity_before_pickup"
+        else:
+            return
+        raise DomainValidationError(
+            [{"loc": ["body", "quote_validity_until"], "msg": msg, "type": kind}],
+            extra={"pickup_date": rfq.pickup_date.isoformat()},
+        )
 
     @staticmethod
     def _apply_extension(

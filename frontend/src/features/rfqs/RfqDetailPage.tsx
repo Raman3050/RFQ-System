@@ -22,6 +22,7 @@ import { useCancelRfq, useLeaderboard, useRfq } from './api';
 import { ActivityLog } from './bidding/ActivityLog';
 import { BidForm } from './bidding/BidForm';
 import { LeaderboardCard } from './bidding/LeaderboardCard';
+import { ResultBanner } from './bidding/ResultBanner';
 import { Countdown, LabeledValue, LiveStatusBadge, Money } from './components';
 import { InvitationsCard } from './InvitationsCard';
 import { liveStatus } from './status';
@@ -186,6 +187,7 @@ export function RfqDetailPage() {
         </Grid>
       </Grid>
 
+      {status && <ResultBanner rfq={rfq} board={board} status={status} isSupplier={isSupplier} />}
       {board && isSupplier && status === 'ACTIVE' && <BidForm rfq={rfq} board={board} />}
       {isSupplier && status === 'SCHEDULED' && (
         <Alert severity="info">

@@ -3,7 +3,7 @@ forced-close cap, validation, visibility, idempotency and concurrency."""
 
 import asyncio
 import itertools
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 from typing import Any
 
@@ -185,6 +185,22 @@ async def test_quote_validation(auction: Auction, overrides: dict[str, Any], fie
     resp = await auction.bid("A", 100, **overrides)
     assert resp.status_code == 422, resp.text
     assert resp.json()["errors"][0]["loc"][-1] == field
+
+
+async def test_quote_must_cover_the_pickup_date(auction: Auction) -> None:
+    await auction.open(closes_in=60 * MIN)
+    pickup = date.fromisoformat((await auction.detail())["pickup_date"])
+
+    too_short = await auction.bid(
+        "A", 100, quote_validity_until=(pickup - timedelta(days=1)).isoformat()
+    )
+    assert too_short.status_code == 422
+    body = too_short.json()
+    assert body["errors"][0]["type"] == "validity_before_pickup"
+    assert body["pickup_date"] == pickup.isoformat()
+
+    on_pickup_day = await auction.bid("A", 100, quote_validity_until=pickup.isoformat())
+    assert on_pickup_day.status_code == 201
 
 
 async def test_total_must_be_positive(auction: Auction) -> None:
