@@ -1,4 +1,5 @@
 import re
+import uuid
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -73,3 +74,45 @@ def invite_token(message: OutgoingEmail) -> str:
     match = re.search(r"accept-invite\?token=([\w-]+)", message.text)
     assert match, message.text
     return match.group(1)
+
+
+async def set_schedule(
+    app: FastAPI,
+    rfq_id: str,
+    *,
+    start: timedelta,
+    close: timedelta,
+    forced: timedelta,
+) -> None:
+    """Move an RFQ's schedule relative to now, to simulate time passing."""
+    from sqlalchemy import update
+
+    from app.models.rfq import Rfq
+
+    now = datetime.now(UTC)
+    async with app.state.sessionmaker() as s:
+        await s.execute(
+            update(Rfq)
+            .where(Rfq.id == uuid.UUID(rfq_id))
+            .values(
+                bid_start_at=now + start,
+                bid_close_at=now + close,
+                current_close_at=now + close,
+                forced_close_at=now + forced,
+            )
+        )
+        await s.commit()
+
+
+def bid_payload(total: str | int | float, **overrides: Any) -> dict[str, Any]:
+    """A quote whose charges add up to `total` (all in freight unless overridden)."""
+    body: dict[str, Any] = {
+        "carrier_name": "Test Carrier",
+        "freight_charges": str(total),
+        "origin_charges": "0",
+        "destination_charges": "0",
+        "transit_time_days": 3,
+        "quote_validity_until": (datetime.now(UTC) + timedelta(days=14)).date().isoformat(),
+    }
+    body.update(overrides)
+    return body

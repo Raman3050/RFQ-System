@@ -12,8 +12,9 @@ extensions near close, a hard forced-close time, configurable triggers, and live
 | 0 | Foundations: scaffolding, Docker, migrations, health checks, CI | ✅ Done |
 | 1 | Auth & users: JWT + rotating refresh cookie, roles, seed data, login/register UI | ✅ Done |
 | 2 | RFQ create/edit/cancel, invite-only suppliers via email, listing & details pages | ✅ Done |
-| 3 | Bidding engine: bids, ranking, auto-extensions, activity log | ⏳ Next |
-| 4–8 | Lifecycle worker, real-time, caching, hardening, analytics | Planned |
+| 3 | Bidding engine: bids, L1/L2 ranking, all 3 extension triggers, forced-close cap, activity log | ✅ Done |
+| 4 | Lifecycle worker: persist open/close/force-close on time | ⏳ Next |
+| 5–8 | Real-time (WebSockets), caching, hardening, analytics | Planned |
 
 ## Repository layout
 
@@ -94,6 +95,33 @@ make check    # backend: ruff, mypy (strict), pytest · frontend: eslint, tsc, p
 
 CI (`.github/workflows/ci.yml`) runs the same checks, applies migrations up/down/up against a
 real Postgres, and builds the Docker images.
+
+## Auction rules (design decisions)
+
+The assignment leaves some behaviour open; these are the rules the engine implements
+(`backend/app/domain/bidding.py`, covered by unit tests that include the spec's examples).
+
+| # | Rule |
+|---|---|
+| D1 | A quote's price is **freight + origin + destination** charges (computed by Postgres). |
+| D2 | A supplier may bid repeatedly; each new bid must be **strictly lower** than their current one. Their latest bid is their active quote. |
+| D3 | Equal totals: the **earlier** bid ranks higher. |
+| D4 | Extension: `new close = min(current close + Y, forced close)` — never past the forced close. |
+| D5 | Trigger window is `[current close − X, current close)`; it **slides** with each extension. Bids are accepted in `[start, current close)`. |
+| D6 | "Any rank change" = a supplier who **already had a rank** moved. A newcomer entering at the bottom isn't a change. |
+| D7 | "L1 change" needs a previous L1 — the very first bid doesn't count. |
+| D8 | **Force Closed** = the auction ended at the forced close (extensions hit the cap); **Closed** = it ended earlier. |
+| D9 | "Now" is the **database clock**, read after taking the auction's row lock. |
+| D10 | Visibility: the buyer sees everything. Suppliers see all prices and ranks, but competitors appear as "Bidder N" without their charge breakdown. |
+| D11 | Schedule and auction rules can be edited only before bidding starts. |
+| D12 | Suppliers are **invite-only**; public sign-up creates buyers. |
+| D13 | An invite can be removed until the auction ends, **unless that supplier has bid** — then they stay. |
+
+**Concurrency:** each bid runs in one transaction holding the RFQ's row lock (`SELECT … FOR
+UPDATE`), so bids on one auction are serialised (others run in parallel); ranking before/after,
+the extension and the activity-log entries commit atomically. A test fires 30 simultaneous bids
+and checks the invariants (close ≤ forced close, one log entry per extension, correct L1,
+strictly decreasing bids per supplier).
 
 ## Authentication
 

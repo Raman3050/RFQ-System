@@ -28,7 +28,7 @@ def effective_status(
 
 
 def is_editable(status: RfqStatus) -> bool:
-    """Schedule and auction rules are frozen once bidding opens (HLD decision D11)."""
+    """Schedule and auction rules are frozen once bidding opens (design decision D11)."""
     return status == RfqStatus.SCHEDULED
 
 

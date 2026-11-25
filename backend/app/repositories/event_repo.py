@@ -1,9 +1,11 @@
 import uuid
 from typing import Any
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.auction_event import AuctionEvent, EventType
+from app.models.user import User
 
 
 class EventRepository:
@@ -23,3 +25,28 @@ class EventRepository:
         )
         self.session.add(event)
         return event
+
+    async def list_for_rfq(
+        self,
+        rfq_id: uuid.UUID,
+        *,
+        types: list[str] | None,
+        before_id: int | None,
+        limit: int,
+    ) -> list[tuple[AuctionEvent, str | None, str | None]]:
+        """Newest first, with the actor's (company, role)."""
+        stmt = (
+            select(AuctionEvent, User.company_name, User.role)
+            .outerjoin(User, User.id == AuctionEvent.actor_id)
+            .where(AuctionEvent.rfq_id == rfq_id)
+            .order_by(AuctionEvent.id.desc())
+            .limit(limit)
+        )
+        if types is not None:
+            stmt = stmt.where(AuctionEvent.event_type.in_(types))
+        if before_id is not None:
+            stmt = stmt.where(AuctionEvent.id < before_id)
+        return [
+            (e, c, r.value if r is not None else None)
+            for e, c, r in (await self.session.execute(stmt)).all()
+        ]

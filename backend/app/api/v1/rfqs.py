@@ -148,3 +148,18 @@ async def resend_invitation(
     result = await RfqService(session, settings).resend_invitation(buyer, rfq_id, email)
     _queue(background, request, result.emails)
     return {"status": "queued"}
+
+
+@router.delete(
+    "/{rfq_id}/invitations/{email}",
+    response_model=RfqDetail,
+    summary="Remove an invite (until the auction ends, and only if the supplier hasn't bid)",
+)
+async def remove_invitation(
+    rfq_id: uuid.UUID,
+    email: NormalizedEmail,
+    buyer: BuyerUser,
+    session: DbSession,
+    settings: SettingsDep,
+) -> RfqDetail:
+    return await RfqService(session, settings).remove_invitation(buyer, rfq_id, email)

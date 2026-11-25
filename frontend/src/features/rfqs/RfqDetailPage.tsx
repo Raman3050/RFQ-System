@@ -14,11 +14,17 @@ import { Link, useLocation, useParams } from 'react-router-dom';
 
 import { ApiError } from '@/api/client';
 import { FullPageSpinner } from '@/features/auth/guards';
+import { useAuth } from '@/features/auth/AuthContext';
 import { formatDate, formatDateTime, formatMinutes } from '@/lib/datetime';
+import { useNow } from '@/lib/useNow';
 
-import { useCancelRfq, useRfq } from './api';
+import { useCancelRfq, useLeaderboard, useRfq } from './api';
+import { ActivityLog } from './bidding/ActivityLog';
+import { BidForm } from './bidding/BidForm';
+import { LeaderboardCard } from './bidding/LeaderboardCard';
 import { Countdown, LabeledValue, LiveStatusBadge, Money } from './components';
 import { InvitationsCard } from './InvitationsCard';
+import { liveStatus } from './status';
 import { TRIGGER_LABEL, type RfqDetail } from './types';
 
 function ScheduleCard({ rfq }: { rfq: RfqDetail }) {
@@ -98,6 +104,11 @@ export function RfqDetailPage() {
   const { data: rfq, isPending, error } = useRfq(rfqId);
   const cancel = useCancelRfq(rfqId);
   const [confirmCancel, setConfirmCancel] = useState(false);
+  const { hasRole } = useAuth();
+  const isSupplier = hasRole('SUPPLIER');
+  const now = useNow();
+  const status = rfq ? liveStatus(rfq, now) : undefined;
+  const { data: board } = useLeaderboard(rfqId, !!rfq && status !== 'SCHEDULED');
 
   if (isPending) return <FullPageSpinner />;
   if (error || !rfq) {
@@ -140,7 +151,17 @@ export function RfqDetailPage() {
             </Typography>
             <LiveStatusBadge rfq={rfq} size="medium" />
           </Stack>
-          <Countdown rfq={rfq} />
+          <Stack direction="row" spacing={2} sx={{ alignItems: 'baseline', flexWrap: 'wrap' }}>
+            <Countdown rfq={rfq} />
+            <Typography variant="body2" color="text.secondary">
+              Current L1: <Money amount={rfq.current_lowest_bid} currency={rfq.currency} />
+            </Typography>
+            {board?.my_rank && (
+              <Typography variant="body2">
+                Your rank: <b>L{board.my_rank}</b> of {board.entries.length}
+              </Typography>
+            )}
+          </Stack>
         </div>
         <Stack direction="row" spacing={1}>
           {rfq.permissions.can_edit && (
@@ -165,19 +186,17 @@ export function RfqDetailPage() {
         </Grid>
       </Grid>
 
-      <Paper variant="outlined" sx={{ p: { xs: 2, sm: 3 } }}>
-        <Stack direction="row" sx={{ justifyContent: 'space-between', alignItems: 'baseline' }}>
-          <Typography variant="h6" component="h2">
-            Bids
-          </Typography>
-          <Typography>
-            Lowest: <Money amount={rfq.current_lowest_bid} currency={rfq.currency} />
-          </Typography>
-        </Stack>
-        <Typography color="text.secondary" sx={{ mt: 1 }}>
-          Ranked bids (L1, L2, …), quote details and the activity log arrive in Phase 3.
-        </Typography>
-      </Paper>
+      {board && isSupplier && status === 'ACTIVE' && <BidForm rfq={rfq} board={board} />}
+      {isSupplier && status === 'SCHEDULED' && (
+        <Alert severity="info">
+          Bidding opens {formatDateTime(rfq.bid_start_at)}. The quote form will appear here
+          automatically.
+        </Alert>
+      )}
+
+      {board && <LeaderboardCard board={board} viewerIsBuyer={!isSupplier} />}
+
+      <ActivityLog rfqId={rfq.id} currency={rfq.currency} live={status === 'ACTIVE'} />
 
       {rfq.invitations && <InvitationsCard rfq={rfq} />}
 

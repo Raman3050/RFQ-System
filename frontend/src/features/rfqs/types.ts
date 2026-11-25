@@ -34,6 +34,8 @@ export interface Invitation {
   supplier_company: string | null;
   invited_at: string;
   last_notified_at: string | null;
+  has_bid: boolean;
+  can_remove: boolean;
 }
 
 export interface RfqDetail extends RfqSummary {
@@ -103,3 +105,78 @@ export const TRIGGER_LABEL: Record<TriggerType, { title: string; description: st
     description: 'Extend only when a different supplier becomes L1 in the last X minutes.',
   },
 };
+
+// ------------------------------------------------------------------ bidding
+
+export interface BidInput {
+  carrier_name: string;
+  freight_charges: string;
+  origin_charges: string;
+  destination_charges: string;
+  transit_time_days: number;
+  quote_validity_until: string;
+}
+
+export interface Bid extends BidInput {
+  id: string;
+  total_amount: string;
+  created_at: string;
+}
+
+export interface BidResult {
+  bid: Bid;
+  rank: number;
+  total_bidders: number;
+  current_close_at: string;
+  extension: {
+    previous_close_at: string;
+    new_close_at: string;
+    reason: string;
+    capped: boolean;
+  } | null;
+  replayed: boolean;
+  server_time: string;
+}
+
+export interface LeaderboardEntry {
+  rank: number;
+  label: string;
+  supplier_label: string;
+  is_you: boolean;
+  total_amount: string;
+  transit_time_days: number;
+  bid_count: number;
+  last_bid_at: string;
+  supplier_name: string | null;
+  carrier_name: string | null;
+  freight_charges: string | null;
+  origin_charges: string | null;
+  destination_charges: string | null;
+  quote_validity_until: string | null;
+}
+
+export interface Leaderboard {
+  status: RfqStatus;
+  currency: Currency;
+  current_close_at: string;
+  forced_close_at: string;
+  extension_count: number;
+  entries: LeaderboardEntry[];
+  my_rank: number | null;
+  my_current_total: string | null;
+  server_time: string;
+}
+
+export interface AuctionEvent {
+  id: number;
+  type: string;
+  created_at: string;
+  actor: string | null;
+  payload: Record<string, unknown>;
+}
+
+export interface EventPage {
+  items: AuctionEvent[];
+  next_before_id: number | null;
+  server_time: string;
+}

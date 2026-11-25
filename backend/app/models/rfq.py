@@ -1,6 +1,7 @@
 import enum
 import uuid
 from datetime import date, datetime
+from decimal import Decimal
 
 from sqlalchemy import (
     Boolean,
@@ -11,6 +12,7 @@ from sqlalchemy import (
     ForeignKey,
     Index,
     Integer,
+    Numeric,
     Sequence,
     String,
     text,
@@ -78,6 +80,13 @@ class Rfq(TimestampMixin, Base):
     )
     currency: Mapped[str] = mapped_column(String(3), nullable=False, server_default="INR")
     extension_count: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    # Denormalised current L1 (lowest active quote) for the listing page; updated in the
+    # same transaction as every bid.
+    current_l1_amount: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
+    current_l1_bid_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("bids.id", ondelete="SET NULL", use_alter=True, name="fk_rfqs_l1_bid"),
+    )
     version: Mapped[int] = mapped_column(Integer, nullable=False)
     cancelled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

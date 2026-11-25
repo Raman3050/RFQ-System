@@ -1,6 +1,11 @@
 import Alert from '@mui/material/Alert';
 import Button from '@mui/material/Button';
 import Chip from '@mui/material/Chip';
+import Dialog from '@mui/material/Dialog';
+import DialogActions from '@mui/material/DialogActions';
+import DialogContent from '@mui/material/DialogContent';
+import DialogContentText from '@mui/material/DialogContentText';
+import DialogTitle from '@mui/material/DialogTitle';
 import List from '@mui/material/List';
 import ListItem from '@mui/material/ListItem';
 import ListItemText from '@mui/material/ListItemText';
@@ -14,13 +19,15 @@ import { EmailChipsField } from '@/components/EmailChipsField';
 import { formatDateTime } from '@/lib/datetime';
 import { EMAIL_RE } from '@/lib/emails';
 
-import { useInviteSuppliers, useResendInvitation } from './api';
+import { useInviteSuppliers, useRemoveInvitation, useResendInvitation } from './api';
 import type { RfqDetail } from './types';
 
 export function InvitationsCard({ rfq }: { rfq: RfqDetail }) {
   const invitations = rfq.invitations ?? [];
   const invite = useInviteSuppliers(rfq.id);
   const resend = useResendInvitation(rfq.id);
+  const remove = useRemoveInvitation(rfq.id);
+  const [confirmRemove, setConfirmRemove] = useState<string | null>(null);
   const [emails, setEmails] = useState<string[]>([]);
   const [notice, setNotice] = useState<string | null>(null);
   const invalid = emails.filter((e) => !EMAIL_RE.test(e));
@@ -67,22 +74,34 @@ export function InvitationsCard({ rfq }: { rfq: RfqDetail }) {
               divider
               secondaryAction={
                 rfq.permissions.can_invite && (
-                  <Button
-                    size="small"
-                    disabled={resend.isPending && resend.variables === inv.email}
-                    onClick={() =>
-                      resend
-                        .mutateAsync(inv.email)
-                        .then(() => setNotice(`Invitation re-sent to ${inv.email}.`))
-                    }
-                  >
-                    Resend
-                  </Button>
+                  <Stack direction="row" spacing={0.5}>
+                    <Button
+                      size="small"
+                      disabled={resend.isPending && resend.variables === inv.email}
+                      onClick={() =>
+                        resend
+                          .mutateAsync(inv.email)
+                          .then(() => setNotice(`Invitation re-sent to ${inv.email}.`))
+                      }
+                    >
+                      Resend
+                    </Button>
+                    {inv.can_remove && (
+                      <Button
+                        size="small"
+                        color="error"
+                        aria-label={`Remove ${inv.email}`}
+                        onClick={() => setConfirmRemove(inv.email)}
+                      >
+                        Remove
+                      </Button>
+                    )}
+                  </Stack>
                 )
               }
             >
               <ListItemText
-                sx={{ pr: 10 }}
+                sx={{ pr: 20 }}
                 primary={
                   <Stack
                     direction="row"
@@ -96,6 +115,7 @@ export function InvitationsCard({ rfq }: { rfq: RfqDetail }) {
                       color={inv.status === 'JOINED' ? 'success' : 'default'}
                       variant="outlined"
                     />
+                    {inv.has_bid && <Chip size="small" label="Has bid" color="primary" />}
                   </Stack>
                 }
                 secondary={
@@ -116,6 +136,38 @@ export function InvitationsCard({ rfq }: { rfq: RfqDetail }) {
         </Alert>
       )}
       {resend.error && <Alert severity="error">{resend.error.message}</Alert>}
+      {remove.error && <Alert severity="error">{remove.error.message}</Alert>}
+
+      <Dialog open={!!confirmRemove} onClose={() => setConfirmRemove(null)}>
+        <DialogTitle>Remove {confirmRemove}?</DialogTitle>
+        <DialogContent>
+          <DialogContentText>
+            They will lose access to this RFQ and won’t be able to bid. Suppliers who have already
+            bid can’t be removed.
+          </DialogContentText>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setConfirmRemove(null)}>Keep</Button>
+          <Button
+            color="error"
+            variant="contained"
+            disabled={remove.isPending}
+            onClick={() => {
+              const email = confirmRemove;
+              if (!email) return;
+              remove.mutateAsync(email).then(
+                () => {
+                  setConfirmRemove(null);
+                  setNotice(`Removed ${email}.`);
+                },
+                () => setConfirmRemove(null),
+              );
+            }}
+          >
+            Remove
+          </Button>
+        </DialogActions>
+      </Dialog>
 
       {rfq.permissions.can_invite && (
         <Stack spacing={1} sx={{ mt: 2 }}>

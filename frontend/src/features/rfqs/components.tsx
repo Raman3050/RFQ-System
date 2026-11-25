@@ -3,6 +3,7 @@ import Stack from '@mui/material/Stack';
 import Typography from '@mui/material/Typography';
 
 import { formatDuration } from '@/lib/datetime';
+import { formatMoney } from '@/lib/money';
 import { useNow } from '@/lib/useNow';
 
 import { liveStatus } from './status';
@@ -72,7 +73,16 @@ export function Countdown({ rfq }: { rfq: RfqSummary }) {
   );
 }
 
-export function Money({ amount, currency }: { amount: string | null; currency: string }) {
+export function Money({
+  amount,
+  currency,
+  plain = false,
+}: {
+  amount: string | null;
+  currency: string;
+  /** Regular weight (for breakdown columns). */
+  plain?: boolean;
+}) {
   if (amount === null) {
     return (
       <Typography component="span" color="text.disabled">
@@ -80,14 +90,12 @@ export function Money({ amount, currency }: { amount: string | null; currency: s
       </Typography>
     );
   }
-  const formatted = new Intl.NumberFormat(undefined, {
-    style: 'currency',
-    currency,
-    maximumFractionDigits: 2,
-  }).format(Number(amount));
   return (
-    <Typography component="span" sx={{ fontVariantNumeric: 'tabular-nums', fontWeight: 600 }}>
-      {formatted}
+    <Typography
+      component="span"
+      sx={{ fontVariantNumeric: 'tabular-nums', fontWeight: plain ? 400 : 600 }}
+    >
+      {formatMoney(amount, currency)}
     </Typography>
   );
 }

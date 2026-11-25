@@ -25,6 +25,9 @@ export default defineConfig(({ mode }) => {
       globals: true,
       setupFiles: ['./src/test/setup.ts'],
       css: false,
+      // jsdom + MUI page tests are CPU-heavy; keep runs deterministic on busy machines/CI.
+      testTimeout: 20_000,
+      maxWorkers: 2,
     },
   };
 });

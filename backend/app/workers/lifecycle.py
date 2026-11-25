@@ -2,7 +2,7 @@
 
 Phase 0: runs the loop skeleton with graceful shutdown and a DB/Redis heartbeat.
 Phase 4: each tick activates SCHEDULED auctions and closes / force-closes ACTIVE ones
-using `SELECT ... FOR UPDATE SKIP LOCKED` (see docs/HLD.md §4.4).
+using `SELECT ... FOR UPDATE SKIP LOCKED` (see README "Auction rules").
 
 Run with:  python -m app.workers.lifecycle
 """

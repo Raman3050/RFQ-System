@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 
 import { resetSession } from '@/features/auth/session';
 import { toLocalInput } from '@/lib/datetime';
-import { makeRfq, makeRfqDetail, page } from '@/test/fixtures';
+import { board, makeRfq, makeRfqDetail, noEvents, page } from '@/test/fixtures';
 import { authResponse, json, makeUser, mockApi, problem } from '@/test/mockApi';
 import { renderApp } from '@/test/render';
 
@@ -250,8 +250,17 @@ describe('create RFQ', () => {
 describe('RFQ details', () => {
   beforeEach(() => resetSession());
 
+  const auctionRoutes = {
+    'GET /api/v1/rfqs/rfq-1/leaderboard': () => json(board([])),
+    'GET /api/v1/rfqs/rfq-1/events?*': () => json(noEvents),
+  };
+
   it('shows schedule, auction rules and invitations to the buyer', async () => {
-    mockApi({ ...asBuyer, 'GET /api/v1/rfqs/rfq-1': () => json(makeRfqDetail()) });
+    mockApi({
+      ...asBuyer,
+      ...auctionRoutes,
+      'GET /api/v1/rfqs/rfq-1': () => json(makeRfqDetail()),
+    });
     renderApp('/auctions/rfq-1');
 
     expect(await screen.findByRole('heading', { name: 'Mumbai → Delhi FTL' })).toBeInTheDocument();
@@ -266,6 +275,7 @@ describe('RFQ details', () => {
   it('hides buyer controls from suppliers', async () => {
     mockApi({
       ...asSupplier,
+      ...auctionRoutes,
       'GET /api/v1/rfqs/rfq-1': () =>
         json(
           makeRfqDetail({

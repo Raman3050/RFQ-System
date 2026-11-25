@@ -4,6 +4,7 @@ from app.db.base import Base
 from app.models import (
     AuctionConfig,
     AuctionEvent,
+    Bid,
     RefreshToken,
     Rfq,
     RfqInvitation,
@@ -15,6 +16,7 @@ __all__ = [
     "AuctionConfig",
     "AuctionEvent",
     "Base",
+    "Bid",
     "RefreshToken",
     "Rfq",
     "RfqInvitation",

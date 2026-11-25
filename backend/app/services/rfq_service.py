@@ -18,6 +18,7 @@ from app.email.sender import OutgoingEmail
 from app.models.auction_event import EventType
 from app.models.rfq import AuctionConfig, Rfq, RfqStatus
 from app.models.user import User, UserRole
+from app.repositories.bid_repo import BidRepository
 from app.repositories.event_repo import EventRepository
 from app.repositories.invitation_repo import InvitationRepository
 from app.repositories.rfq_repo import RfqRepository, RfqRow, SortKey
@@ -241,6 +242,46 @@ class RfqService:
         await self.session.commit()
         return WithEmails(None, [message])
 
+    async def remove_invitation(self, buyer: User, rfq_id: uuid.UUID, email: str) -> RfqDetail:
+        """Rule: an invite can be removed until the auction ends, unless that supplier has
+        already bid. Once they've bid, they stay (their bids are part of the auction).
+
+        Holds the RFQ row lock, the same lock bid submission takes, so a bid can't slip in
+        between the "has bid?" check and the delete.
+        """
+        rfq = await self._owned_for_update(buyer, rfq_id)
+        if not can_invite(_status_of(rfq, datetime.now(UTC))):
+            raise ConflictError(
+                "Invitations can't be changed after the auction has ended",
+                code="RFQ_NOT_INVITABLE",
+            )
+        invitation = await self.invitations.get(rfq.id, email)
+        if invitation is None:
+            raise NotFoundError("This email has not been invited", code="INVITATION_NOT_FOUND")
+        if invitation.supplier_id is not None and await BidRepository(
+            self.session
+        ).supplier_has_bid(rfq.id, invitation.supplier_id):
+            raise ConflictError(
+                "This supplier has already bid and can't be removed", code="SUPPLIER_HAS_BID"
+            )
+
+        await self.invitations.delete(invitation)
+        link_revoked = False
+        if (
+            invitation.supplier_id is None
+            and not await self.invitations.email_has_other_invitations(email)
+        ):
+            # Nothing left to sign up for: kill the pending sign-up link too.
+            link_revoked = await self.invitations.revoke_pending_invite(email)
+        self.events.record(
+            rfq.id,
+            EventType.SUPPLIER_REMOVED,
+            actor_id=buyer.id,
+            payload={"email": email, "signup_link_revoked": link_revoked},
+        )
+        await self.session.commit()
+        return await self.get(buyer, rfq.id)
+
     # ---------------------------------------------------------------- queries
 
     async def get(self, user: User, rfq_id: uuid.UUID) -> RfqDetail:
@@ -249,7 +290,8 @@ class RfqService:
             raise NotFoundError("RFQ not found", code="RFQ_NOT_FOUND")
         now = datetime.now(UTC)
         is_owner = user.role == UserRole.ADMIN or row.rfq.buyer_id == user.id
-        invitations = await self._invitations(row.rfq.id) if is_owner else None
+        invitable = can_invite(_status_of(row.rfq, now))
+        invitations = await self._invitations(row.rfq.id, invitable) if is_owner else None
         return self._detail(row, now, invitations, is_owner)
 
     async def list_rfqs(
@@ -283,7 +325,7 @@ class RfqService:
             raise NotFoundError("RFQ not found", code="RFQ_NOT_FOUND")
         return rfq
 
-    async def _invitations(self, rfq_id: uuid.UUID) -> list[InvitationOut]:
+    async def _invitations(self, rfq_id: uuid.UUID, invitable: bool) -> list[InvitationOut]:
         rows = await self.invitations.list_for_rfq(rfq_id)
         return [
             InvitationOut(
@@ -293,6 +335,8 @@ class RfqService:
                 supplier_company=r.supplier_company,
                 invited_at=r.invitation.created_at,
                 last_notified_at=r.invitation.last_notified_at,
+                has_bid=r.has_bid,
+                can_remove=invitable and not r.has_bid,
             )
             for r in rows
         ]
@@ -308,7 +352,7 @@ class RfqService:
             "status": _status_of(rfq, now),
             "is_british_auction": rfq.is_british_auction,
             "currency": rfq.currency,
-            "current_lowest_bid": None,
+            "current_lowest_bid": rfq.current_l1_amount,
             "bid_start_at": rfq.bid_start_at,
             "bid_close_at": rfq.bid_close_at,
             "current_close_at": rfq.current_close_at,

@@ -1,4 +1,5 @@
 from app.models.auction_event import AuctionEvent, EventType
+from app.models.bid import Bid
 from app.models.invitation import RfqInvitation, SupplierInvite
 from app.models.refresh_token import RefreshToken
 from app.models.rfq import AuctionConfig, Rfq, RfqStatus, TriggerType
@@ -7,6 +8,7 @@ from app.models.user import User, UserRole
 __all__ = [
     "AuctionConfig",
     "AuctionEvent",
+    "Bid",
     "EventType",
     "RefreshToken",
     "Rfq",

@@ -94,6 +94,10 @@ class InvitationOut(BaseModel):
     supplier_company: str | None
     invited_at: UtcOut
     last_notified_at: UtcOut | None
+    has_bid: bool
+    can_remove: bool = Field(
+        description="Invites can be removed until the auction ends, unless the supplier has bid"
+    )
 
 
 class BuyerOut(BaseModel):
@@ -111,7 +115,7 @@ class RfqSummary(BaseModel):
     status: RfqStatus
     is_british_auction: bool
     currency: str
-    current_lowest_bid: Decimal | None = Field(description="Populated from Phase 3")
+    current_lowest_bid: Decimal | None = Field(description="Current L1 total, if any bids")
     bid_start_at: UtcOut
     bid_close_at: UtcOut
     current_close_at: UtcOut

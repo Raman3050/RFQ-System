@@ -1,4 +1,4 @@
-import type { RfqDetail, RfqSummary } from '@/features/rfqs/types';
+import type { Leaderboard, LeaderboardEntry, RfqDetail, RfqSummary } from '@/features/rfqs/types';
 
 const HOUR = 3600_000;
 
@@ -44,6 +44,8 @@ export function makeRfqDetail(overrides: Partial<RfqDetail> = {}): RfqDetail {
         supplier_company: 'BlueDart Freight',
         invited_at: new Date().toISOString(),
         last_notified_at: new Date().toISOString(),
+        has_bid: false,
+        can_remove: true,
       },
       {
         email: 'new@example.com',
@@ -52,6 +54,8 @@ export function makeRfqDetail(overrides: Partial<RfqDetail> = {}): RfqDetail {
         supplier_company: null,
         invited_at: new Date().toISOString(),
         last_notified_at: new Date().toISOString(),
+        has_bid: false,
+        can_remove: true,
       },
     ],
     permissions: { can_edit: true, can_cancel: true, can_invite: true },
@@ -63,3 +67,44 @@ export function makeRfqDetail(overrides: Partial<RfqDetail> = {}): RfqDetail {
 export function page<T>(items: T[]) {
   return { items, total: items.length, page: 1, size: 20, server_time: new Date().toISOString() };
 }
+
+export function entry(overrides: Partial<LeaderboardEntry> = {}): LeaderboardEntry {
+  return {
+    rank: 1,
+    label: 'L1',
+    supplier_label: 'BlueDart Freight',
+    is_you: false,
+    total_amount: '1000.00',
+    transit_time_days: 3,
+    bid_count: 1,
+    last_bid_at: new Date().toISOString(),
+    supplier_name: 'Arjun Mehta',
+    carrier_name: 'BlueDart',
+    freight_charges: '800.00',
+    origin_charges: '100.00',
+    destination_charges: '100.00',
+    quote_validity_until: '2026-12-31',
+    ...overrides,
+  };
+}
+
+export function board(
+  entries: LeaderboardEntry[],
+  overrides: Partial<Leaderboard> = {},
+): Leaderboard {
+  const mine = entries.find((e) => e.is_you);
+  return {
+    status: 'ACTIVE',
+    currency: 'INR',
+    current_close_at: new Date(Date.now() + 3600_000).toISOString(),
+    forced_close_at: new Date(Date.now() + 7200_000).toISOString(),
+    extension_count: 0,
+    entries,
+    my_rank: mine?.rank ?? null,
+    my_current_total: mine?.total_amount ?? null,
+    server_time: new Date().toISOString(),
+    ...overrides,
+  };
+}
+
+export const noEvents = { items: [], next_before_id: null, server_time: new Date().toISOString() };

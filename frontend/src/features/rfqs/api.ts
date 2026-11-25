@@ -1,8 +1,26 @@
-import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import {
+  keepPreviousData,
+  useInfiniteQuery,
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from '@tanstack/react-query';
 
 import { API_V1, apiRequest } from '@/api/client';
 
-import type { Page, RfqCreateInput, RfqDetail, RfqListParams, RfqSummary, RfqWrite } from './types';
+import type {
+  BidInput,
+  BidResult,
+  EventPage,
+  Leaderboard,
+  Page,
+  RfqCreateInput,
+  RfqDetail,
+  RfqListParams,
+  RfqStatus,
+  RfqSummary,
+  RfqWrite,
+} from './types';
 
 const BASE = `${API_V1}/rfqs`;
 
@@ -11,7 +29,12 @@ export const rfqKeys = {
   lists: () => [...rfqKeys.all, 'list'] as const,
   list: (params: RfqListParams) => [...rfqKeys.lists(), params] as const,
   detail: (id: string) => [...rfqKeys.all, 'detail', id] as const,
+  leaderboard: (id: string) => [...rfqKeys.all, 'leaderboard', id] as const,
+  events: (id: string) => [...rfqKeys.all, 'events', id] as const,
 };
+
+/** Poll faster while an auction is live; Phase 5 replaces polling with WebSockets. */
+const pollFor = (status: RfqStatus | undefined) => (status === 'ACTIVE' ? 5_000 : 30_000);
 
 function toQuery(params: RfqListParams): string {
   const qs = new URLSearchParams();
@@ -38,7 +61,7 @@ export function useRfq(id: string | undefined) {
     queryKey: rfqKeys.detail(id ?? ''),
     queryFn: () => apiRequest<RfqDetail>(`${BASE}/${id}`),
     enabled: !!id,
-    refetchInterval: 15_000,
+    refetchInterval: (q) => pollFor(q.state.data?.status),
   });
 }
 
@@ -94,4 +117,67 @@ export function useResendInvitation(id: string) {
       ),
     onSuccess: () => void qc.invalidateQueries({ queryKey: rfqKeys.detail(id) }),
   });
+}
+
+// ------------------------------------------------------------------ bidding
+
+export function useLeaderboard(id: string, enabled = true) {
+  return useQuery({
+    queryKey: rfqKeys.leaderboard(id),
+    queryFn: () => apiRequest<Leaderboard>(`${BASE}/${id}/leaderboard`),
+    enabled: !!id && enabled,
+    refetchInterval: (q) => pollFor(q.state.data?.status),
+  });
+}
+
+export function useActivity(id: string, live: boolean) {
+  return useInfiniteQuery({
+    queryKey: rfqKeys.events(id),
+    queryFn: ({ pageParam }) =>
+      apiRequest<EventPage>(
+        `${BASE}/${id}/events?limit=30${pageParam ? `&before_id=${pageParam}` : ''}`,
+      ),
+    initialPageParam: null as number | null,
+    getNextPageParam: (last) => last.next_before_id,
+    enabled: !!id,
+    refetchInterval: live ? 5_000 : false,
+  });
+}
+
+/** Invalidate everything a bid can change. */
+function useInvalidateAuction(id: string) {
+  const qc = useQueryClient();
+  return () =>
+    Promise.all([
+      qc.invalidateQueries({ queryKey: rfqKeys.detail(id) }),
+      qc.invalidateQueries({ queryKey: rfqKeys.leaderboard(id) }),
+      qc.invalidateQueries({ queryKey: rfqKeys.events(id) }),
+      qc.invalidateQueries({ queryKey: rfqKeys.lists() }),
+    ]);
+}
+
+export function useSubmitBid(id: string) {
+  const invalidate = useInvalidateAuction(id);
+  return useMutation({
+    // One key per submit attempt: retries of the same attempt can't double-bid.
+    mutationFn: ({ input, idempotencyKey }: { input: BidInput; idempotencyKey: string }) =>
+      apiRequest<BidResult>(`${BASE}/${id}/bids`, {
+        method: 'POST',
+        json: input,
+        headers: { 'Idempotency-Key': idempotencyKey },
+      }),
+    onSettled: () => void invalidate(),
+  });
+}
+
+export function useRemoveInvitation(id: string) {
+  const invalidate = useInvalidateAuction(id);
+  return useRfqMutation((email: string) =>
+    apiRequest<RfqDetail>(`${BASE}/${id}/invitations/${encodeURIComponent(email)}`, {
+      method: 'DELETE',
+    }).then((r) => {
+      void invalidate();
+      return r;
+    }),
+  );
 }

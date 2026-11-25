@@ -5,6 +5,7 @@ from datetime import datetime
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.models.bid import Bid
 from app.models.invitation import RfqInvitation, SupplierInvite
 from app.models.user import User
 
@@ -14,6 +15,7 @@ class InvitationRow:
     invitation: RfqInvitation
     supplier_name: str | None
     supplier_company: str | None
+    has_bid: bool
 
 
 class InvitationRepository:
@@ -32,8 +34,13 @@ class InvitationRepository:
         return {e.lower() for e in rows.scalars()}
 
     async def list_for_rfq(self, rfq_id: uuid.UUID) -> list[InvitationRow]:
+        has_bid = (
+            select(Bid.id)
+            .where(Bid.rfq_id == RfqInvitation.rfq_id, Bid.supplier_id == RfqInvitation.supplier_id)
+            .exists()
+        )
         stmt = (
-            select(RfqInvitation, User.full_name, User.company_name)
+            select(RfqInvitation, User.full_name, User.company_name, has_bid)
             .outerjoin(User, User.id == RfqInvitation.supplier_id)
             .where(RfqInvitation.rfq_id == rfq_id)
             .order_by(RfqInvitation.created_at, RfqInvitation.invitee_email)
@@ -43,6 +50,25 @@ class InvitationRepository:
 
     def add(self, invitation: RfqInvitation) -> None:
         self.session.add(invitation)
+
+    async def delete(self, invitation: RfqInvitation) -> None:
+        await self.session.delete(invitation)
+        await self.session.flush()
+
+    async def email_has_other_invitations(self, email: str) -> bool:
+        stmt = select(
+            select(RfqInvitation.rfq_id).where(RfqInvitation.invitee_email == email).exists()
+        )
+        return bool((await self.session.execute(stmt)).scalar())
+
+    async def revoke_pending_invite(self, email: str) -> bool:
+        """Delete an unused sign-up link so it stops working. Returns True if one existed."""
+        pending = await self.pending_invite_for_update(email)
+        if pending is None:
+            return False
+        await self.session.delete(pending)
+        await self.session.flush()
+        return True
 
     async def link_supplier(self, email: str, supplier_id: uuid.UUID) -> list[uuid.UUID]:
         """Attach a newly created supplier account to all RFQs they were invited to."""
