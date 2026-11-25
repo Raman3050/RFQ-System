@@ -7,6 +7,7 @@ import {
 } from '@tanstack/react-query';
 
 import { API_V1, apiRequest } from '@/api/client';
+import { liveClient } from '@/features/realtime/liveClient';
 
 import type {
   BidInput,
@@ -33,8 +34,13 @@ export const rfqKeys = {
   events: (id: string) => [...rfqKeys.all, 'events', id] as const,
 };
 
-/** Poll faster while an auction is live; Phase 5 replaces polling with WebSockets. */
-const pollFor = (status: RfqStatus | undefined) => (status === 'ACTIVE' ? 5_000 : 30_000);
+/**
+ * With a live WebSocket, pushes drive refetches and we only keep a slow safety refresh.
+ * Without one (blocked by a proxy, reconnecting), fall back to polling.
+ */
+const SAFETY_REFRESH_MS = 60_000;
+const pollFor = (status: RfqStatus | undefined) =>
+  liveClient.isLive() ? SAFETY_REFRESH_MS : status === 'ACTIVE' ? 5_000 : 30_000;
 
 function toQuery(params: RfqListParams): string {
   const qs = new URLSearchParams();
@@ -52,7 +58,7 @@ export function useRfqList(params: RfqListParams) {
     queryKey: rfqKeys.list(params),
     queryFn: () => apiRequest<Page<RfqSummary>>(`${BASE}${toQuery(params)}`),
     placeholderData: keepPreviousData,
-    refetchInterval: 15_000, // live updates arrive over WebSockets in Phase 5
+    refetchInterval: () => (liveClient.isLive() ? SAFETY_REFRESH_MS : 15_000),
   });
 }
 
@@ -140,7 +146,7 @@ export function useActivity(id: string, live: boolean) {
     initialPageParam: null as number | null,
     getNextPageParam: (last) => last.next_before_id,
     enabled: !!id,
-    refetchInterval: live ? 5_000 : false,
+    refetchInterval: () => (live && !liveClient.isLive() ? 5_000 : false),
   });
 }
 

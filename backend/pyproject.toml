@@ -68,3 +68,7 @@ asyncio_default_fixture_loop_scope = "function"
 testpaths = ["tests"]
 addopts = "-ra --strict-markers"
 markers = ["integration: needs running Postgres/Redis"]
+filterwarnings = [
+    # Upstream: Starlette's TestClient (used only for WebSocket tests) still wraps httpx.
+    "ignore:Using `httpx` with `starlette.testclient` is deprecated",
+]

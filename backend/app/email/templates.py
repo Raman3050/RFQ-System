@@ -1,6 +1,7 @@
 """Plain-text + minimal HTML email bodies. All user-supplied values are HTML-escaped."""
 
 from datetime import datetime
+from decimal import Decimal
 from html import escape
 
 from app.email.sender import OutgoingEmail
@@ -77,3 +78,39 @@ def rfq_invitation(
         "View RFQ",
     )
     return OutgoingEmail(to, subject, text, html, tags={"kind": "rfq_invitation"})
+
+
+def auction_won(
+    *,
+    to: str,
+    supplier_name: str,
+    buyer_company: str,
+    rfq_reference: str,
+    rfq_name: str,
+    total: str,
+    currency: str,
+    pickup_date: str,
+    closed_at: datetime,
+    link: str,
+) -> OutgoingEmail:
+    amount = f"{currency} {Decimal(total):,.2f}"
+    subject = f"You won {rfq_reference} — {rfq_name}"
+    text = (
+        f"Hi {supplier_name},\n\n"
+        f"Your quote of {amount} was the lowest when {rfq_reference} — {rfq_name} "
+        f"closed on {_fmt(closed_at)}. You are the L1 supplier for {buyer_company}.\n\n"
+        f"Pickup / service date: {pickup_date}.\n\n"
+        f"View the auction result: {link}"
+    )
+    html = _html(
+        [
+            f"Hi {escape(supplier_name)},",
+            f"Your quote of <b>{escape(amount)}</b> was the lowest when "
+            f"<b>{escape(rfq_reference)}</b> — {escape(rfq_name)} closed on {_fmt(closed_at)}. "
+            f"You are the L1 supplier for <b>{escape(buyer_company)}</b>.",
+            f"Pickup / service date: {escape(pickup_date)}.",
+        ],
+        link,
+        "View result",
+    )
+    return OutgoingEmail(to, subject, text, html, tags={"kind": "auction_won"})

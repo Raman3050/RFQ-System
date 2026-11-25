@@ -23,6 +23,8 @@ from app.cache.redis import create_redis, ping_redis
 from app.core.config import get_settings
 from app.core.logging import configure_logging, get_logger
 from app.db.session import create_engine, create_sessionmaker, ping_db
+from app.email.sender import create_email_sender
+from app.realtime.publisher import RedisPublisher
 from app.services.lifecycle_service import LifecycleService, TickStats
 
 log = get_logger("app.worker.lifecycle")
@@ -55,7 +57,12 @@ async def run() -> None:
     configure_logging(settings.log_level, json=settings.log_json)
     engine = create_engine(settings)
     redis = create_redis(settings)
-    service = LifecycleService(create_sessionmaker(engine))
+    service = LifecycleService(
+        create_sessionmaker(engine),
+        settings=settings,
+        email_sender=create_email_sender(settings),
+        publisher=RedisPublisher(redis),
+    )
 
     stop = asyncio.Event()
     loop = asyncio.get_running_loop()

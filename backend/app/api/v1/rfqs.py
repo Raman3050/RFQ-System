@@ -91,25 +91,31 @@ async def update_rfq(
     rfq_id: uuid.UUID,
     body: RfqUpdate,
     buyer: BuyerUser,
+    request: Request,
     session: DbSession,
     settings: SettingsDep,
     if_match: Annotated[str | None, Header()] = None,
 ) -> RfqDetail:
     version = _parse_if_match(if_match, required=True)
     assert version is not None  # noqa: S101 - narrowed by required=True
-    return await RfqService(session, settings).update(buyer, rfq_id, body, version)
+    return await RfqService(session, settings, request.app.state.publisher).update(
+        buyer, rfq_id, body, version
+    )
 
 
 @router.post("/{rfq_id}/cancel", response_model=RfqDetail, summary="Cancel before bidding starts")
 async def cancel_rfq(
     rfq_id: uuid.UUID,
     buyer: BuyerUser,
+    request: Request,
     session: DbSession,
     settings: SettingsDep,
     if_match: Annotated[str | None, Header()] = None,
 ) -> RfqDetail:
     version = _parse_if_match(if_match, required=False)
-    return await RfqService(session, settings).cancel(buyer, rfq_id, version)
+    return await RfqService(session, settings, request.app.state.publisher).cancel(
+        buyer, rfq_id, version
+    )
 
 
 @router.post(

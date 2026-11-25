@@ -18,6 +18,8 @@ from app.email.sender import OutgoingEmail
 from app.models.auction_event import EventType
 from app.models.rfq import AuctionConfig, Rfq, RfqStatus
 from app.models.user import User, UserRole
+from app.realtime.messages import auction_message
+from app.realtime.publisher import EventPublisher, NullPublisher
 from app.repositories.bid_repo import BidRepository
 from app.repositories.event_repo import EventRepository
 from app.repositories.invitation_repo import InvitationRepository
@@ -66,9 +68,15 @@ def _new_config(cfg: AuctionConfigIn) -> AuctionConfig:
 
 
 class RfqService:
-    def __init__(self, session: AsyncSession, settings: Settings) -> None:
+    def __init__(
+        self,
+        session: AsyncSession,
+        settings: Settings,
+        publisher: EventPublisher | None = None,
+    ) -> None:
         self.session = session
         self.settings = settings
+        self.publisher: EventPublisher = publisher or NullPublisher()
         self.rfqs = RfqRepository(session)
         self.invitations = InvitationRepository(session)
         self.events = EventRepository(session)
@@ -191,13 +199,16 @@ class RfqService:
                 rfq.config.extension_minutes = data.auction_config.extension_minutes
                 rfq.config.trigger_type = data.auction_config.trigger_type
 
-        self.events.record(
+        event = self.events.record(
             rfq.id,
             EventType.RFQ_UPDATED,
             actor_id=buyer.id,
             payload={"changed": sorted(changes)},
         )
         await self.session.commit()
+        await self.publisher.publish(
+            auction_message(EventType.RFQ_UPDATED.value, rfq, seq=event.id, now=now)
+        )
         return await self.get(buyer, rfq.id)
 
     async def cancel(
@@ -215,8 +226,11 @@ class RfqService:
             )
         rfq.status = RfqStatus.CANCELLED
         rfq.cancelled_at = func.now()
-        self.events.record(rfq.id, EventType.RFQ_CANCELLED, actor_id=buyer.id)
+        event = self.events.record(rfq.id, EventType.RFQ_CANCELLED, actor_id=buyer.id)
         await self.session.commit()
+        await self.publisher.publish(
+            auction_message(EventType.RFQ_CANCELLED.value, rfq, seq=event.id, now=datetime.now(UTC))
+        )
         return await self.get(buyer, rfq.id)
 
     async def invite(

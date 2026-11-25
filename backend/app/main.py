@@ -13,6 +13,9 @@ from app.core.logging import configure_logging, get_logger
 from app.core.middleware import RequestContextMiddleware
 from app.db.session import create_engine, create_sessionmaker
 from app.email.sender import create_email_sender
+from app.realtime import ws
+from app.realtime.manager import ConnectionManager
+from app.realtime.publisher import NullPublisher, RedisPublisher
 
 log = get_logger(__name__)
 
@@ -27,10 +30,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         app.state.engine = engine
         app.state.sessionmaker = create_sessionmaker(engine)
         app.state.redis = create_redis(settings)
+        app.state.publisher = RedisPublisher(app.state.redis)
+        await app.state.ws_manager.start()
         log.info("startup", environment=settings.environment)
         try:
             yield
         finally:
+            await app.state.ws_manager.stop()
             await app.state.redis.aclose()
             await engine.dispose()
             log.info("shutdown")
@@ -45,6 +51,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     )
     app.state.settings = settings
     app.state.email_sender = create_email_sender(settings)
+    # Replaced with the Redis-backed publisher at startup; tests may swap in doubles.
+    app.state.publisher = NullPublisher()
+    app.state.ws_manager = ConnectionManager(str(settings.redis_url))
 
     app.add_middleware(
         CORSMiddleware,
@@ -58,6 +67,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     register_exception_handlers(app)
 
     app.include_router(health.router)
+    app.include_router(ws.router)
     app.include_router(api_router, prefix=settings.api_v1_prefix)
     return app
 

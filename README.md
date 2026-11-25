@@ -14,8 +14,9 @@ extensions near close, a hard forced-close time, configurable triggers, and live
 | 2 | RFQ create/edit/cancel, invite-only suppliers via email, listing & details pages | ✅ Done |
 | 3 | Bidding engine: bids, L1/L2 ranking, all 3 extension triggers, forced-close cap, activity log | ✅ Done |
 | 4 | Lifecycle worker: opens/closes/force-closes auctions on time, records the winner | ✅ Done |
-| 5 | Real-time updates over WebSockets | ⏳ Next |
-| 6–8 | Caching, hardening, analytics | Planned |
+| 5 | Real-time updates (WebSockets + Redis pub/sub), winner email on close | ✅ Done |
+| 6 | Essential hardening: rate limiting, production images, load test, security pass | ⏳ Next |
+| 7 | Success metrics dashboard + submission polish | Planned |
 
 ## Repository layout
 
@@ -140,6 +141,32 @@ strictly decreasing bids per supplier).
 
 Readers never depend on the worker being on time: status is always derived from the clock,
 and bids re-check the time under the row lock.
+
+## Real-time updates
+
+Pages showing live auctions hold **one WebSocket per browser tab** (`/ws`):
+
+```
+bid / worker ──commit──▶ Redis PUBLISH auction:{id} ──▶ every API process ──▶ subscribed sockets
+```
+
+- Auth is the first message (`{"type":"auth","token":…}`), never the URL; the socket closes
+  with `4401` when the access token expires and the client refreshes and reconnects.
+- Subscriptions are access-checked like `GET /rfqs/{id}`. Messages carry only public facts
+  (status, close time, extension reason, current L1 price); clients then refetch their own
+  leaderboard/activity view, so competitor anonymity is enforced in one place.
+- Each message has a `seq` (latest activity-log id). After a reconnect the server sends a
+  `SNAPSHOT`; if its `seq` moved on, the client refetches what it missed.
+- Reconnects with backoff; while not live the UI falls back to polling (a "Live / Reconnecting…"
+  indicator shows which). Extensions and closes pop a toast.
+
+**Winner email:** when the worker closes an auction with bids, the L1 supplier gets
+"You won RFQ-…" (price, pickup date, link). Sent after the close is committed.
+
+**Known limitation (by design, for scope):** publishing and the winner email happen after the
+commit, best-effort. If the process dies in that instant, the auction data is still correct but
+that one notification is lost (clients recover on their next refresh). A transactional outbox
+would make delivery guaranteed.
 
 ## Authentication
 

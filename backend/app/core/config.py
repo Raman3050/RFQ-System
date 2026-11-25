@@ -55,6 +55,11 @@ class Settings(BaseSettings):
     smtp_use_tls: bool = False
     smtp_timeout_seconds: float = 10.0
 
+    # Real-time (WebSocket)
+    ws_auth_timeout_seconds: float = 5.0
+    ws_ping_seconds: float = 25.0  # keeps proxies from dropping idle sockets
+    ws_max_subscriptions: int = 100
+
     # Lifecycle worker
     worker_tick_seconds: float = 1.0
 

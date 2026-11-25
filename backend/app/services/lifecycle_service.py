@@ -21,11 +21,16 @@ from typing import Any
 from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from app.core.config import Settings
 from app.core.logging import get_logger
+from app.email import templates
+from app.email.sender import EmailSender, OutgoingEmail, send_safely
 from app.models.auction_event import EventType
 from app.models.bid import Bid
 from app.models.rfq import Rfq, RfqStatus
 from app.models.user import User
+from app.realtime.messages import auction_message
+from app.realtime.publisher import EventPublisher, NullPublisher
 from app.repositories.event_repo import EventRepository
 
 log = get_logger("app.lifecycle")
@@ -51,8 +56,28 @@ async def _db_now(session: AsyncSession) -> datetime:
 
 
 class LifecycleService:
-    def __init__(self, sessionmaker: async_sessionmaker[AsyncSession]) -> None:
+    def __init__(
+        self,
+        sessionmaker: async_sessionmaker[AsyncSession],
+        *,
+        settings: Settings | None = None,
+        email_sender: EmailSender | None = None,
+        publisher: EventPublisher | None = None,
+    ) -> None:
         self.sessionmaker = sessionmaker
+        self.settings = settings
+        self.email_sender = email_sender
+        self.publisher: EventPublisher = publisher or NullPublisher()
+
+    async def _after_commit(
+        self, messages: list[dict[str, Any]], emails: list[OutgoingEmail]
+    ) -> None:
+        """Side effects run only once the transaction is durable (never for a rollback)."""
+        for message in messages:
+            await self.publisher.publish(message)
+        if self.email_sender is not None:
+            for email in emails:
+                await send_safely(self.email_sender, email)
 
     async def run_once(self) -> TickStats:
         """Process everything that is due, in batches. Safe to call concurrently."""
@@ -73,6 +98,7 @@ class LifecycleService:
     # ---------------------------------------------------------------- start
 
     async def _start_batch(self, stats: TickStats) -> int:
+        messages: list[dict[str, Any]] = []
         async with self.sessionmaker() as session, session.begin():
             now = await _db_now(session)
             rows = (
@@ -96,18 +122,25 @@ class LifecycleService:
             events = EventRepository(session)
             for rfq in rows:
                 rfq.status = RfqStatus.ACTIVE
-                events.record(
+                event = events.record(
                     rfq.id,
                     EventType.AUCTION_STARTED,
                     actor_id=None,
                     payload={"bid_start_at": rfq.bid_start_at.isoformat()},
                 )
+                await session.flush()
+                messages.append(
+                    auction_message(EventType.AUCTION_STARTED.value, rfq, seq=event.id, now=now)
+                )
             stats.started += len(rows)
-            return len(rows)
+        await self._after_commit(messages, [])
+        return len(rows)
 
     # ---------------------------------------------------------------- close
 
     async def _close_batch(self, stats: TickStats) -> int:
+        messages: list[dict[str, Any]] = []
+        emails: list[OutgoingEmail] = []
         async with self.sessionmaker() as session, session.begin():
             now = await _db_now(session)
             rows = (
@@ -141,21 +174,26 @@ class LifecycleService:
                 forced = rfq.current_close_at >= rfq.forced_close_at
                 rfq.status = RfqStatus.FORCE_CLOSED if forced else RfqStatus.CLOSED
                 rfq.closed_at = now
-                events.record(
-                    rfq.id,
-                    EventType.AUCTION_FORCE_CLOSED if forced else EventType.AUCTION_CLOSED,
-                    actor_id=None,
-                    payload=await self._result_payload(session, rfq, forced),
-                )
+                event_type = EventType.AUCTION_FORCE_CLOSED if forced else EventType.AUCTION_CLOSED
+                payload, winner = await self._result_payload(session, rfq, forced)
+                event = events.record(rfq.id, event_type, actor_id=None, payload=payload)
+                await session.flush()
+                messages.append(auction_message(event_type.value, rfq, seq=event.id, now=now))
+                if winner is not None:
+                    emails.append(await self._winner_email(session, rfq, payload, winner, now))
                 if forced:
                     stats.force_closed += 1
                 else:
                     stats.closed += 1
                 stats.closed_ids.append(rfq.id)
-            return len(rows)
+        await self._after_commit(messages, emails)
+        return len(rows)
 
     @staticmethod
-    async def _result_payload(session: AsyncSession, rfq: Rfq, forced: bool) -> dict[str, Any]:
+    async def _result_payload(
+        session: AsyncSession, rfq: Rfq, forced: bool
+    ) -> tuple[dict[str, Any], tuple[str, str] | None]:
+        """Returns (activity-log payload, winner (email, full name) or None)."""
         counts = (
             await session.execute(
                 select(func.count(), func.count(func.distinct(Bid.supplier_id))).where(
@@ -179,7 +217,14 @@ class LifecycleService:
         if rfq.current_l1_bid_id is not None:
             winner = (
                 await session.execute(
-                    select(Bid.id, Bid.supplier_id, Bid.total_amount, User.company_name)
+                    select(
+                        Bid.id,
+                        Bid.supplier_id,
+                        Bid.total_amount,
+                        User.company_name,
+                        User.email,
+                        User.full_name,
+                    )
                     .join(User, User.id == Bid.supplier_id)
                     .where(Bid.id == rfq.current_l1_bid_id)
                 )
@@ -191,4 +236,29 @@ class LifecycleService:
                     winning_total=str(winner[2]),
                     winning_supplier_company=winner[3],
                 )
-        return payload
+                return payload, (winner[4], winner[5])
+        return payload, None
+
+    async def _winner_email(
+        self,
+        session: AsyncSession,
+        rfq: Rfq,
+        payload: dict[str, Any],
+        winner: tuple[str, str],
+        closed_at: datetime,
+    ) -> OutgoingEmail:
+        buyer = await session.get(User, rfq.buyer_id)
+        base = (self.settings.frontend_base_url if self.settings else "").rstrip("/")
+        email, name = winner
+        return templates.auction_won(
+            to=email,
+            supplier_name=name,
+            buyer_company=buyer.company_name if buyer else "",
+            rfq_reference=rfq.reference_id,
+            rfq_name=rfq.name,
+            total=str(payload["winning_total"]),
+            currency=rfq.currency,
+            pickup_date=rfq.pickup_date.strftime("%d %b %Y"),
+            closed_at=closed_at,
+            link=f"{base}/auctions/{rfq.id}",
+        )

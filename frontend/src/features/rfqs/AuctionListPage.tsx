@@ -20,6 +20,8 @@ import { useEffect, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 
 import { useAuth } from '@/features/auth/AuthContext';
+import { LiveIndicator } from '@/features/realtime/LiveIndicator';
+import { useLiveAuctions } from '@/features/realtime/useLiveAuctions';
 import { formatDateTime } from '@/lib/datetime';
 
 import { useRfqList } from './api';
@@ -79,6 +81,12 @@ export function AuctionListPage() {
     size,
   });
 
+  // Live close times / L1 prices for the rows on screen (ended auctions don't change).
+  const liveIds = (data?.items ?? [])
+    .filter((r) => r.status === 'SCHEDULED' || r.status === 'ACTIVE')
+    .map((r) => r.id);
+  const liveState = useLiveAuctions(liveIds);
+
   return (
     <Stack spacing={3}>
       <Stack
@@ -90,6 +98,7 @@ export function AuctionListPage() {
           <Typography variant="h4" component="h1">
             British Auctions
           </Typography>
+          {liveIds.length > 0 && <LiveIndicator state={liveState} />}
           <Typography color="text.secondary">
             {isBuyer
               ? `RFQs created by ${user?.company_name}`

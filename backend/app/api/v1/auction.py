@@ -3,7 +3,7 @@
 import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, Header, Query, status
+from fastapi import APIRouter, Header, Query, Request, status
 
 from app.api.deps import CurrentUser, DbSession, SettingsDep, SupplierUser
 from app.schemas.bid import BidCreate, BidHistoryItem, BidResult, EventPage, Leaderboard
@@ -28,11 +28,12 @@ async def submit_bid(
     rfq_id: uuid.UUID,
     body: BidCreate,
     supplier: SupplierUser,
+    request: Request,
     session: DbSession,
     settings: SettingsDep,
     idempotency_key: Annotated[str | None, Header(max_length=100)] = None,
 ) -> BidResult:
-    return await BiddingService(session, settings).submit(
+    return await BiddingService(session, settings, request.app.state.publisher).submit(
         supplier, rfq_id, body, idempotency_key=idempotency_key
     )
 

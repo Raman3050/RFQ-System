@@ -1,7 +1,7 @@
 import uuid
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.auction_event import AuctionEvent, EventType
@@ -50,3 +50,10 @@ class EventRepository:
             (e, c, r.value if r is not None else None)
             for e, c, r in (await self.session.execute(stmt)).all()
         ]
+
+    async def latest_id(self, rfq_id: uuid.UUID) -> int | None:
+        result = await self.session.execute(
+            select(func.max(AuctionEvent.id)).where(AuctionEvent.rfq_id == rfq_id)
+        )
+        latest: int | None = result.scalar()
+        return latest

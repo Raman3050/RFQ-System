@@ -7,6 +7,7 @@ import DialogContentText from '@mui/material/DialogContentText';
 import DialogTitle from '@mui/material/DialogTitle';
 import Grid from '@mui/material/Grid';
 import Paper from '@mui/material/Paper';
+import Snackbar from '@mui/material/Snackbar';
 import Stack from '@mui/material/Stack';
 import Typography from '@mui/material/Typography';
 import { useState } from 'react';
@@ -15,6 +16,8 @@ import { Link, useLocation, useParams } from 'react-router-dom';
 import { ApiError } from '@/api/client';
 import { FullPageSpinner } from '@/features/auth/guards';
 import { useAuth } from '@/features/auth/AuthContext';
+import { LiveIndicator } from '@/features/realtime/LiveIndicator';
+import { useLiveAuctions } from '@/features/realtime/useLiveAuctions';
 import { formatDate, formatDateTime, formatMinutes } from '@/lib/datetime';
 import { useNow } from '@/lib/useNow';
 
@@ -110,6 +113,19 @@ export function RfqDetailPage() {
   const now = useNow();
   const status = rfq ? liveStatus(rfq, now) : undefined;
   const { data: board } = useLeaderboard(rfqId, !!rfq && status !== 'SCHEDULED');
+  const [toast, setToast] = useState<string | null>(null);
+  const liveState = useLiveAuctions(rfqId ? [rfqId] : [], (msg) => {
+    if (msg.type === 'TIME_EXTENDED' && msg.extension) {
+      setToast(
+        `Auction extended to ${formatDateTime(msg.extension.new_close_at)} — ${msg.extension.reason.toLowerCase()}` +
+          (msg.extension.capped ? ' (reached the forced close)' : ''),
+      );
+    } else if (msg.type === 'AUCTION_CLOSED' || msg.type === 'AUCTION_FORCE_CLOSED') {
+      setToast(msg.type === 'AUCTION_FORCE_CLOSED' ? 'Auction force-closed' : 'Auction closed');
+    } else if (msg.type === 'AUCTION_STARTED') {
+      setToast('Bidding is now open');
+    }
+  });
 
   if (isPending) return <FullPageSpinner />;
   if (error || !rfq) {
@@ -143,9 +159,12 @@ export function RfqDetailPage() {
         sx={{ justifyContent: 'space-between', alignItems: { md: 'flex-start' } }}
       >
         <div>
-          <Typography variant="overline" color="text.secondary">
-            {rfq.reference_id} · {rfq.buyer.company_name}
-          </Typography>
+          <Stack direction="row" spacing={1.5} sx={{ alignItems: 'center' }}>
+            <Typography variant="overline" color="text.secondary">
+              {rfq.reference_id} · {rfq.buyer.company_name}
+            </Typography>
+            <LiveIndicator state={liveState} />
+          </Stack>
           <Stack direction="row" spacing={1.5} sx={{ alignItems: 'center', flexWrap: 'wrap' }}>
             <Typography variant="h4" component="h1">
               {rfq.name}
@@ -201,6 +220,17 @@ export function RfqDetailPage() {
       <ActivityLog rfqId={rfq.id} currency={rfq.currency} live={status === 'ACTIVE'} />
 
       {rfq.invitations && <InvitationsCard rfq={rfq} />}
+
+      <Snackbar
+        open={!!toast}
+        autoHideDuration={8000}
+        onClose={() => setToast(null)}
+        anchorOrigin={{ vertical: 'top', horizontal: 'center' }}
+      >
+        <Alert severity="warning" variant="filled" onClose={() => setToast(null)}>
+          {toast}
+        </Alert>
+      </Snackbar>
 
       <Dialog open={confirmCancel} onClose={() => setConfirmCancel(false)}>
         <DialogTitle>Cancel {rfq.reference_id}?</DialogTitle>

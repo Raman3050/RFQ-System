@@ -31,6 +31,8 @@ from app.models.bid import Bid
 from app.models.invitation import RfqInvitation
 from app.models.rfq import Rfq, RfqStatus
 from app.models.user import User
+from app.realtime.messages import auction_message, iso
+from app.realtime.publisher import EventPublisher, NullPublisher
 from app.repositories.bid_repo import BidRepository
 from app.repositories.event_repo import EventRepository
 from app.repositories.rfq_repo import RfqRepository
@@ -46,9 +48,15 @@ class _Applied:
 
 
 class BiddingService:
-    def __init__(self, session: AsyncSession, settings: Settings) -> None:
+    def __init__(
+        self,
+        session: AsyncSession,
+        settings: Settings,
+        publisher: EventPublisher | None = None,
+    ) -> None:
         self.session = session
         self.settings = settings
+        self.publisher: EventPublisher = publisher or NullPublisher()
         self.rfqs = RfqRepository(session)
         self.bids = BidRepository(session)
         self.events = EventRepository(session)
@@ -117,7 +125,7 @@ class BiddingService:
         rfq.current_l1_amount = l1.total
         rfq.current_l1_bid_id = l1.bid_id
 
-        self.events.record(
+        last_event = self.events.record(
             rfq.id,
             EventType.BID_SUBMITTED,
             actor_id=supplier.id,
@@ -132,7 +140,7 @@ class BiddingService:
             },
         )
         if applied is not None:
-            self.events.record(
+            last_event = self.events.record(
                 rfq.id,
                 EventType.TIME_EXTENDED,
                 actor_id=supplier.id,
@@ -148,6 +156,23 @@ class BiddingService:
             )
 
         await self.session.commit()
+        # After commit: tell every viewer something changed (they refetch their own view).
+        await self.publisher.publish(
+            auction_message(
+                EventType.TIME_EXTENDED.value if applied else EventType.BID_SUBMITTED.value,
+                rfq,
+                seq=last_event.id,
+                now=now,
+                extension={
+                    "previous_close_at": iso(applied.previous_close),
+                    "new_close_at": iso(rfq.current_close_at),
+                    "reason": applied.decision.reason,
+                    "capped": applied.decision.capped,
+                }
+                if applied
+                else None,
+            )
+        )
         log.info(
             "bid_submitted",
             rfq_id=str(rfq.id),
