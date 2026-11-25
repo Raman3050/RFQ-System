@@ -47,15 +47,6 @@ class BidRepository:
             for s, b, t, c in (await self.session.execute(stmt)).all()
         ]
 
-    async def latest_for_supplier(self, rfq_id: uuid.UUID, supplier_id: uuid.UUID) -> Bid | None:
-        stmt = (
-            select(Bid)
-            .where(Bid.rfq_id == rfq_id, Bid.supplier_id == supplier_id)
-            .order_by(Bid.created_at.desc(), Bid.id.desc())
-            .limit(1)
-        )
-        return (await self.session.execute(stmt)).scalar_one_or_none()
-
     async def by_idempotency_key(
         self, rfq_id: uuid.UUID, supplier_id: uuid.UUID, key: str
     ) -> Bid | None:

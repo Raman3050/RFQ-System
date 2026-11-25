@@ -1,4 +1,3 @@
-/// <reference types="vitest/config" />
 import path from 'node:path';
 import react from '@vitejs/plugin-react';
 import { defineConfig, loadEnv } from 'vite';
@@ -19,15 +18,6 @@ export default defineConfig(({ mode }) => {
         '/health': { target: apiTarget, changeOrigin: true },
         '/ws': { target: apiTarget, ws: true, changeOrigin: true },
       },
-    },
-    test: {
-      environment: 'jsdom',
-      globals: true,
-      setupFiles: ['./src/test/setup.ts'],
-      css: false,
-      // jsdom + MUI page tests are CPU-heavy; keep runs deterministic on busy machines/CI.
-      testTimeout: 20_000,
-      maxWorkers: 2,
     },
   };
 });

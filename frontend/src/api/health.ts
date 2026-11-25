@@ -1,7 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
 
-import { apiRequest } from './client';
-
 export interface DependencyStatus {
   status: 'ok' | 'error';
   error: string | null;
@@ -41,5 +39,3 @@ export function useReadiness() {
     refetchInterval: 10_000,
   });
 }
-
-export { apiRequest };

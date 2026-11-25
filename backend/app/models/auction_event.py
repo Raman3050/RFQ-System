@@ -11,17 +11,17 @@ from app.db.base import Base
 
 
 class EventType(enum.StrEnum):
-    # Phase 2
+    # RFQ management (buyer)
     RFQ_CREATED = "RFQ_CREATED"
     RFQ_UPDATED = "RFQ_UPDATED"
     RFQ_CANCELLED = "RFQ_CANCELLED"
     SUPPLIER_INVITED = "SUPPLIER_INVITED"
     SUPPLIER_JOINED = "SUPPLIER_JOINED"
     SUPPLIER_REMOVED = "SUPPLIER_REMOVED"
-    # Phase 3+
+    # Bidding
     BID_SUBMITTED = "BID_SUBMITTED"
-    RANK_CHANGED = "RANK_CHANGED"
     TIME_EXTENDED = "TIME_EXTENDED"
+    # Lifecycle (worker)
     AUCTION_STARTED = "AUCTION_STARTED"
     AUCTION_CLOSED = "AUCTION_CLOSED"
     AUCTION_FORCE_CLOSED = "AUCTION_FORCE_CLOSED"
@@ -29,7 +29,7 @@ class EventType(enum.StrEnum):
 
 class AuctionEvent(Base):
     """Append-only activity log per RFQ. The monotonically increasing `id` doubles as a
-    sequence number for real-time clients to detect gaps (Phase 5)."""
+    sequence number for real-time clients to detect missed updates."""
 
     __tablename__ = "auction_events"
 

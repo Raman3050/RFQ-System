@@ -97,10 +97,3 @@ async function withCrossTabLock<T>(fn: () => Promise<T>): Promise<T> {
   if (!locks) return fn();
   return locks.request('rfq-auth-refresh', fn);
 }
-
-/** Test helper. */
-export function resetSession(): void {
-  current = null;
-  inflight = null;
-  listeners.clear();
-}

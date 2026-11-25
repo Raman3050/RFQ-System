@@ -1,6 +1,5 @@
 import uuid
 from dataclasses import dataclass
-from datetime import datetime
 
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -106,7 +105,3 @@ class InvitationRepository:
         invite.accepted_at = func.now()
         invite.accepted_user_id = user_id
         await self.session.flush()
-
-    @staticmethod
-    def is_expired(invite: SupplierInvite, now: datetime) -> bool:
-        return invite.expires_at <= now

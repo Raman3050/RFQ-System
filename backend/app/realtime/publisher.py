@@ -39,16 +39,6 @@ class RedisPublisher:
             )
 
 
-class MemoryPublisher:
-    """Test double: records every published message."""
-
-    def __init__(self) -> None:
-        self.messages: list[dict[str, Any]] = []
-
-    async def publish(self, message: dict[str, Any]) -> None:
-        self.messages.append(message)
-
-
 class NullPublisher:
     async def publish(self, message: dict[str, Any]) -> None:
         return None

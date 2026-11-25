@@ -45,9 +45,8 @@ class Settings(BaseSettings):
     supplier_invite_ttl_days: int = Field(default=7, ge=1, le=30)
     frontend_base_url: str = "http://localhost:5173"  # used to build links in emails
 
-    # Email. "smtp" in deployed envs (and Mailpit locally); "memory" keeps messages
-    # in-process for tests; "console" just logs them.
-    email_backend: Literal["smtp", "console", "memory"] = "console"
+    # Email: "smtp" (Mailpit locally, a real provider when deployed) or "console" (log only).
+    email_backend: Literal["smtp", "console"] = "console"
     email_from: str = "RFQ Auctions <no-reply@rfq-auctions.local>"
     smtp_host: str = "localhost"
     smtp_port: int = 1025

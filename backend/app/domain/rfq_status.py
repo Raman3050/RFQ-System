@@ -1,6 +1,6 @@
 """Effective RFQ status: the stored status reconciled with the clock.
 
-The lifecycle worker (Phase 4) persists transitions, but readers must never depend on
+The lifecycle worker persists transitions, but readers must never depend on
 it being on time, so every read derives the status from timestamps. Pure functions only.
 """
 

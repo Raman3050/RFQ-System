@@ -1,8 +1,8 @@
-"""Outbound email: a small interface with SMTP, console and in-memory backends.
+"""Outbound email: a small interface with SMTP and console backends.
 
 Emails are sent *after* the database transaction commits (via FastAPI background
 tasks), so a failed send never rolls back business data. Failures are logged and the
-buyer can resend an invitation. A durable outbox replaces this in Phase 7.
+buyer can resend an invitation (see README: Known limitations).
 """
 
 from dataclasses import dataclass, field
@@ -59,22 +59,10 @@ class ConsoleEmailSender:
         log.info("email_console", to=message.to, subject=message.subject, body=message.text)
 
 
-class MemoryEmailSender:
-    """Test backend: keeps every message for assertions."""
-
-    def __init__(self) -> None:
-        self.outbox: list[OutgoingEmail] = []
-
-    async def send(self, message: OutgoingEmail) -> None:
-        self.outbox.append(message)
-
-
 def create_email_sender(settings: Settings) -> EmailSender:
     match settings.email_backend:
         case "smtp":
             return SmtpEmailSender(settings)
-        case "memory":
-            return MemoryEmailSender()
         case _:
             return ConsoleEmailSender()
 

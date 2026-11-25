@@ -65,10 +65,6 @@ class ConnectionManager:
             conn.offer(raw)
         return len(targets)
 
-    @property
-    def subscription_count(self) -> int:
-        return sum(len(v) for v in self._subs.values())
-
     # ---------------------------------------------------------------- redis listener
 
     async def start(self) -> None:

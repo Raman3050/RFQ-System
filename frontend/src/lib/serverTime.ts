@@ -17,12 +17,3 @@ export function syncServerTime(serverTimeIso: string, receivedAtMs: number = Dat
 export function serverNow(): number {
   return Date.now() + offsetMs;
 }
-
-export function getServerOffsetMs(): number {
-  return offsetMs;
-}
-
-/** Test helper. */
-export function resetServerTime(): void {
-  offsetMs = 0;
-}

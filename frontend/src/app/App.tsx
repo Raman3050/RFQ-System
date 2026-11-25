@@ -1,8 +1,8 @@
 import { lazy, Suspense } from 'react';
 import { Navigate, Route, Routes } from 'react-router-dom';
 
-import { ComingSoon } from '@/components/ComingSoon';
 import { Layout } from '@/components/Layout';
+import { NotFoundPage } from '@/components/NotFoundPage';
 import { FullPageSpinner, RedirectIfAuthenticated, RequireAuth } from '@/features/auth/guards';
 import { LoginPage } from '@/features/auth/LoginPage';
 
@@ -94,7 +94,7 @@ export function App() {
               </RequireAuth>
             }
           />
-          <Route path="*" element={<ComingSoon title="Page not found" phase={0} />} />
+          <Route path="*" element={<NotFoundPage />} />
         </Route>
       </Routes>
     </Suspense>

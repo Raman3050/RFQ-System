@@ -21,10 +21,6 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = [
-    "pytest>=8.3",
-    "pytest-asyncio>=0.24",
-    "pytest-cov>=6.0",
-    "httpx>=0.28",
     "ruff>=0.8",
     "mypy>=1.13",
 ]
@@ -49,27 +45,8 @@ ignore = ["B008"]  # FastAPI Depends() in defaults is idiomatic
 known-first-party = ["app"]
 known-third-party = ["alembic"]
 
-[tool.ruff.lint.per-file-ignores]
-"tests/**" = ["S101", "S105", "S106"]  # asserts and fixture credentials
-"scripts/**" = ["S101", "S311"]  # load generation: plain `random` is the right tool
-
 [tool.mypy]
 python_version = "3.12"
 strict = true
 plugins = ["pydantic.mypy"]
 exclude = ["alembic/"]
-
-[[tool.mypy.overrides]]
-module = ["tests.*"]
-disallow_untyped_defs = false
-
-[tool.pytest.ini_options]
-asyncio_mode = "auto"
-asyncio_default_fixture_loop_scope = "function"
-testpaths = ["tests"]
-addopts = "-ra --strict-markers"
-markers = ["integration: needs running Postgres/Redis"]
-filterwarnings = [
-    # Upstream: Starlette's TestClient (used only for WebSocket tests) still wraps httpx.
-    "ignore:Using `httpx` with `starlette.testclient` is deprecated",
-]

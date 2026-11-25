@@ -54,7 +54,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     )
     app.state.settings = settings
     app.state.email_sender = create_email_sender(settings)
-    # Replaced with the Redis-backed publisher at startup; tests may swap in doubles.
+    # No-op until startup connects Redis (see lifespan above).
     app.state.publisher = NullPublisher()
     app.state.rate_limiter = RateLimiter(None, enabled=False)
     app.state.ws_manager = ConnectionManager(str(settings.redis_url))

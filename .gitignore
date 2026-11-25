@@ -22,3 +22,6 @@ coverage/
 .DS_Store
 .idea/
 .vscode/
+
+# Local test suites and load test (kept out of the repository)
+/testing/

@@ -16,7 +16,7 @@ depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
-    # gen_random_uuid() for UUID primary keys; citext for case-insensitive emails (Phase 1).
+    # gen_random_uuid() for UUID primary keys; citext for case-insensitive emails.
     op.execute('CREATE EXTENSION IF NOT EXISTS "pgcrypto"')
     op.execute('CREATE EXTENSION IF NOT EXISTS "citext"')
 

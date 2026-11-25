@@ -82,20 +82,6 @@ services:
       api: { condition: service_healthy }
     restart: unless-stopped
 
-  # Load test (on demand):  make loadtest
-  loadtest:
-    build: { context: ./backend, target: dev }
-    image: rfq-auction-backend:dev-tools
-    profiles: ["tools"]
-    env_file: .env.prod
-    environment:
-      ENVIRONMENT: production
-      REFRESH_COOKIE_SECURE: "true"
-      DATABASE_URL: postgresql+asyncpg://rfq:${POSTGRES_PASSWORD}@postgres:5432/rfq_auction
-      REDIS_URL: redis://redis:6379/0
-    command: ["python", "-m", "scripts.loadtest", "--base-url", "http://web:8080"]
-    depends_on:
-      web: { condition: service_started }
 
 volumes:
   pgdata:

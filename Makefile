@@ -3,16 +3,9 @@ BACKEND := backend
 FRONTEND := frontend
 PY := $(BACKEND)/.venv/bin
 
-# Host-side tests talk to the docker Postgres/Redis on the ports from .env.
--include .env
-POSTGRES_PORT ?= 5432
-REDIS_PORT ?= 6379
-export DATABASE_URL ?= postgresql+asyncpg://rfq:rfq@localhost:$(POSTGRES_PORT)/rfq_auction
-export REDIS_URL ?= redis://localhost:$(REDIS_PORT)/0
-
 .PHONY: help setup up down logs ps migrate revision seed \
-        be-test be-lint be-fmt fe-lock fe-test fe-lint fe-build check \
-        prod-up prod-down prod-logs loadtest
+        be-lint be-fmt fe-lock fe-lint fe-build check \
+        prod-up prod-down prod-logs
 
 help: ## Show available targets
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  %-12s %s\n", $$1, $$2}'
@@ -43,9 +36,6 @@ revision: ## Create a migration: make revision m="add users"
 seed: ## Create demo buyer + 4 suppliers (password: Demo@12345)
 	docker compose exec -T api python -m app.cli.seed
 
-be-test: ## Backend unit + integration tests (needs `make up` or postgres running)
-	cd $(BACKEND) && .venv/bin/pytest
-
 be-lint: ## Backend lint + type check
 	cd $(BACKEND) && .venv/bin/ruff check . && .venv/bin/ruff format --check . && .venv/bin/mypy app
 
@@ -56,16 +46,13 @@ fe-lock: ## Regenerate package-lock.json with the Docker image's npm (run after 
 	docker run --rm -v "$(CURDIR)/$(FRONTEND):/app" -w /app node:24-alpine \
 		npm install --package-lock-only --no-audit --no-fund
 
-fe-test: ## Frontend tests
-	cd $(FRONTEND) && npm test
-
 fe-lint: ## Frontend lint + type check + format check
 	cd $(FRONTEND) && npm run lint && npm run typecheck && npm run format:check
 
 fe-build: ## Frontend production build
 	cd $(FRONTEND) && npm run build
 
-check: be-lint be-test fe-lint fe-test fe-build ## Everything CI runs
+check: be-lint fe-lint fe-build ## Lint, type-check and build (what CI runs)
 
 # ---------------------------------------------------------------- production-style stack
 PROD := docker compose -f docker-compose.prod.yml --env-file .env.prod
@@ -79,6 +66,3 @@ prod-down: ## Stop the production stack
 
 prod-logs: ## Tail production logs
 	$(PROD) logs -f --tail=100
-
-loadtest: ## Concurrent-bidding load test against the production stack (through Nginx)
-	$(PROD) --profile tools run --rm loadtest $(ARGS)

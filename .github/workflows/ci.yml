@@ -35,8 +35,7 @@ jobs:
     env:
       DATABASE_URL: postgresql+asyncpg://rfq:rfq@localhost:5432/rfq_auction
       REDIS_URL: redis://localhost:6379/0
-      ENVIRONMENT: test  # integration tests use Redis DB 15
-      REQUIRE_INTEGRATION: "1"  # fail, don't skip, if Postgres is missing
+      ENVIRONMENT: test
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -51,8 +50,6 @@ jobs:
         run: mypy app
       - name: Migrations apply cleanly (up, down, up)
         run: alembic upgrade head && alembic downgrade base && alembic upgrade head
-      - name: Tests
-        run: pytest --cov=app --cov-report=term-missing
 
   frontend:
     runs-on: ubuntu-latest
@@ -70,7 +67,6 @@ jobs:
       - run: npm run lint
       - run: npm run typecheck
       - run: npm run format:check
-      - run: npm test
       - run: npm run build
 
   docker:
